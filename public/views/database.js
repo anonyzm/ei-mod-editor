@@ -2,7 +2,8 @@
 import { api, h, guard, toast, dirty } from '/app.js';
 import { readRes } from '/formats/res.js';
 import { dbForFile, readDatabase, writeDatabase, fieldView, textToField } from '/formats/db.js';
-import { schema } from '/lib/gamedb.js';
+import { schema, recordInfo } from '/lib/gamedb.js';
+import { buildModel, loadFigModel, textureDataUrl, createPreview } from '/lib/eiscene.js';
 
 // Friendly names, in the order users look for things.
 const TABLES = [
@@ -23,9 +24,10 @@ const SOURCES = [['Res/database.res', 'Одиночная игра'], ['Res/data
 
 export async function mount(root, [srcArg]) {
   const S = await schema();
-  const st = { src: SOURCES.some(s => s[0] === srcArg) ? srcArg : SOURCES[0][0], files: new Map(), changed: new Set(), table: null, rec: null, filter: '' };
+  const st = { src: SOURCES.some(s => s[0] === srcArg) ? srcArg : SOURCES[0][0], files: new Map(), changed: new Set(), table: null, rec: null, filter: '', infos: new Map() };
 
-  const left = h('div.body'), tbl = h('div.scroll'), right = h('div.body');
+  const left = h('div.body'), tbl = h('div.scroll'), right = h('div.body'), head = h('div.rec-head'), previewBox = h('div.preview');
+  const preview = createPreview(previewBox);
   const search = h('input.search', { placeholder: 'Поиск по имени…', oninput: e => { st.filter = e.target.value.toLowerCase(); renderRecords(); } });
   const saveBtn = h('button.primary', { disabled: true, onclick: save }, 'Сохранить в игру');
   const srcSel = h('select', { onchange: e => { if (st.changed.size && !confirm('Несохранённые изменения пропадут. Продолжить?')) { e.target.value = st.src; return; } location.hash = 'database/' + e.target.value; } },
@@ -33,7 +35,7 @@ export async function mount(root, [srcArg]) {
   root.append(h('div.work',
     h('div.side', h('div.head', h('h3', 'Таблицы'), srcSel), left),
     h('div.center', h('div.toolbar', search, h('button', { onclick: () => recordAction('dup') }, '⧉ Дублировать'), h('button.danger', { onclick: () => recordAction('del') }, '✕ Удалить'), h('span.sp'), saveBtn), tbl),
-    h('div.side.right', h('div.head', h('h3', 'Свойства записи')), right),
+    h('div.side.right', h('div.head', h('h3', 'Свойства записи')), head, right),
   ));
 
   const entries = readRes(await api.file(st.src));
@@ -51,7 +53,7 @@ export async function mount(root, [srcArg]) {
       ...items.map(([file, bid, title]) => {
         const f = st.files.get(file), t = f?.data.tables.find(x => x.id === bid);
         if (!t) return null;
-        return h('li', { className: st.table?.t === t ? 'sel' : '', onclick: () => { st.table = { file, t, db: f.db }; st.rec = null; renderTables(); renderRecords(); renderRecord(); } }, title, h('small', t.records.length));
+        return h('li', { className: st.table?.t === t ? 'sel' : '', onclick: () => { st.table = { file, t, db: f.db }; st.rec = null; renderTables(); renderRecords(); renderRecord(); loadInfos(); } }, title, h('small', t.records.length));
       }),
     ])));
   }
@@ -61,17 +63,44 @@ export async function mount(root, [srcArg]) {
   const typeOf = (bid, fid) => st.table.db.types[bid]?.[fid];
   const recName = rec => { const f = rec.children?.find(c => c.data && /^(Fixed)?String$/.test(typeOf(st.table.t.id, c.id) || '')); return f ? fieldView('String', f.data).text : '(без имени)'; };
 
+  // In-game name, icon and model of every record of the open table (from texts.res / figures.res).
+  const valOf = (t, r) => f => { const n = fieldNode(r, f); return n?.data ? fieldView(st.table.db.types[t.id]?.[f], n.data).text : ''; };
+  async function loadInfos() {
+    const tb = st.table;
+    for (const r of tb.t.records) st.infos.set(r, await recordInfo(tb.db, tb.t.id, valOf(tb.t, r)));
+    if (st.table === tb) { renderRecords(); renderRecord(); }
+  }
+  const iconImg = name => { const img = h('img.icon', { alt: '' }); if (name) textureDataUrl(name).then(u => { if (u) img.src = u; }); else img.style.visibility = 'hidden'; return img; };
+
   function renderRecords() {
     if (!st.table) { tbl.replaceChildren(h('div.empty', 'Выберите таблицу слева')); return; }
     const { t } = st.table;
-    // first 7 simple columns
-    const cols = (t.records[0]?.children || []).filter(c => c.data).slice(0, 7).map(c => c.id);
-    const rows = t.records.map((r, i) => ({ r, i, name: recName(r) })).filter(x => !st.filter || x.name.toLowerCase().includes(st.filter));
+    // first 6 simple columns after the in-game name
+    const cols = (t.records[0]?.children || []).filter(c => c.data).slice(0, 6).map(c => c.id);
+    const hasIcons = t.records.some(r => st.infos.get(r)?.icon);
+    const rows = t.records.map((r, i) => ({ r, i, name: recName(r), info: st.infos.get(r) || {} }))
+      .filter(x => !st.filter || x.name.toLowerCase().includes(st.filter) || x.info.title?.toLowerCase().includes(st.filter));
     tbl.replaceChildren(h('table.grid',
-      h('thead', h('tr', h('th', '#'), cols.map(id => h('th', { title: headerOf(t.id, id)?.desc || '' }, RU[headerOf(t.id, id)?.name] || headerOf(t.id, id)?.name || `Поле ${id}`)))),
-      h('tbody', rows.map(({ r, i }) => h('tr', { className: r === st.rec ? 'sel' : '', onclick: () => { st.rec = r; renderRecords(); renderRecord(); } },
-        h('td.muted', i + 1), cols.map(id => { const f = fieldNode(r, id); return h('td', f?.data ? fieldView(typeOf(t.id, id), f.data).text : ''); })))),
+      h('thead', h('tr', h('th', '#'), h('th', 'Название в игре'), cols.map(id => h('th', { title: headerOf(t.id, id)?.desc || '' }, RU[headerOf(t.id, id)?.name] || headerOf(t.id, id)?.name || `Поле ${id}`)))),
+      h('tbody', rows.map(({ r, i, name, info }) => h('tr', { className: r === st.rec ? 'sel' : '', onclick: () => { st.rec = r; renderRecords(); renderRecord(); } },
+        h('td.muted', i + 1),
+        h('td', h('div.named', hasIcons ? iconImg(info.icon) : null, h('span', info.title || name, info.title ? h('small.sub', name) : null))),
+        cols.map(id => { const f = fieldNode(r, id); return h('td', f?.data ? fieldView(typeOf(t.id, id), f.data).text : ''); })))),
     ));
+  }
+
+  let shown = null;
+  async function renderHead() {
+    const rec = st.rec, info = rec && st.infos.get(rec);
+    if (!rec) return head.replaceChildren();
+    head.replaceChildren(h('div.rec-title', info?.icon ? iconImg(info.icon) : null, h('div', h('b', info?.title || recName(rec)), info?.title ? h('small.sub', recName(rec)) : null)),
+      ...(info?.model ? [previewBox] : []));
+    const key = info?.model && JSON.stringify(info.model);
+    if (!key || key === shown) return;
+    shown = key;
+    const m = info.model, data = m.fig ? await loadFigModel(m.name) : undefined;
+    const obj = (m.fig && !data) ? null : await buildModel(m.name, { data, texture: m.texture, complection: m.complection || undefined });
+    if (shown === key) preview.show(obj);
   }
 
   function fieldInput(bid, node, onSet) {
@@ -89,10 +118,11 @@ export async function mount(root, [srcArg]) {
 
   function renderRecord() {
     const rec = st.rec;
+    renderHead();
     if (!rec) { right.replaceChildren(h('div.empty', 'Выберите запись в таблице')); return; }
     const bid = st.table.t.id;
     const set = (node) => (type, text) => {
-      try { node.data = textToField(type, text, node.data); markChanged(); renderRecords(); }
+      try { node.data = textToField(type, text, node.data); markChanged(); recordInfo(st.table.db, bid, valOf(st.table.t, rec)).then(i => { st.infos.set(rec, i); renderRecords(); renderHead(); }); }
       catch (e) { toast('Неверное значение: ' + e.message, 'err'); }
     };
     right.replaceChildren(h('div.form', rec.children.map(node => {
@@ -112,13 +142,13 @@ export async function mount(root, [srcArg]) {
     if (!st.rec) return toast('Сначала выберите запись', 'err');
     const list = st.table.t.records, i = list.indexOf(st.rec);
     if (kind === 'del') {
-      if (!confirm(`Удалить «${recName(st.rec)}»? Если она используется на картах или в других таблицах, игра может упасть.`)) return;
+      if (!confirm(`Удалить «${st.infos.get(st.rec)?.title || recName(st.rec)}»? Если она используется на картах или в других таблицах, игра может упасть.`)) return;
       list.splice(i, 1); st.rec = list[Math.min(i, list.length - 1)] || null;
     } else {
       const copy = structuredClone(st.rec);
       const nameNode = copy.children.find(c => c.data && /^String$/.test(typeOf(st.table.t.id, c.id) || ''));
       if (nameNode) nameNode.data = textToField('String', fieldView('String', nameNode.data).text + ' copy');
-      list.splice(i + 1, 0, copy); st.rec = copy;
+      list.splice(i + 1, 0, copy); st.rec = copy; st.infos.set(copy, st.infos.get(list[i]));
       toast('Создана копия. Переименуйте её в поле «Имя» — имя должно быть уникальным.');
     }
     markChanged(); renderTables(); renderRecords(); renderRecord();
@@ -133,4 +163,5 @@ export async function mount(root, [srcArg]) {
   }
 
   renderRecords(); renderRecord();
+  return () => preview.dispose();
 }

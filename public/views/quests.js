@@ -75,7 +75,7 @@ export async function mount(root, [srcArg]) {
   function renderList() {
     const items = st.entries.filter(e => kindOf(e) === st.tab && (!st.filter || e.name.toLowerCase().includes(st.filter) || e.text?.toLowerCase().includes(st.filter)));
     list.replaceChildren(h('ul.list', items.map(e => h('li', { className: e === st.sel ? 'sel' : '', title: e.name, onclick: () => { st.sel = e; renderList(); renderMain(); } },
-      (e.text || '').split(/\r?\n/)[0] || e.name, h('small', e.name.replace(/^\S+\s/, ''))))));
+      (e.text || '').split(/\r?\n/)[0] || e.name, h('small.sub', e.name.replace(/^\S+\s/, ''))))));
   }
   function changed(e, text) { e.text = text; st.put.set(e.name, e); saveBtn.disabled = false; dirty.add('quests'); }
 

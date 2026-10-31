@@ -6,7 +6,9 @@
   "description": "Редактор модов для Evil Islands / Проклятые Земли",
   "scripts": {
     "start": "node server.js",
-    "test": "node tools/selftest.mjs"
+    "test": "node tools/selftest.mjs",
+    "mcp": "node mcp.js",
+    "test:mcp": "node tools/mcp-test.mjs"
   },
   "dependencies": {
     "three": "^0.169.0"

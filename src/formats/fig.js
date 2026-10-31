@@ -66,6 +66,16 @@ function figBounds(variants) {
   return w.result();
 }
 
+// Item models (init*.fig) store packed UVs (from ei_figer): weapons and helms once, small items twice;
+// each unpack is u *= 2, v = 2v - 1. Returns the fig with unpacked UVs.
+export function unpackItemUv(name, fig) {
+  const n = /^init(qu|qi|limt|litr)\d+item/i.test(name) ? 2 : /^init(we[a-z]+\d+weapon|arhl\d+armor)/i.test(name) ? 1 : 0;
+  if (!n) return fig;
+  const uv = fig.uv.slice();
+  for (let k = 0; k < n; k++) for (let i = 0; i < uv.length; i += 2) { uv[i] *= 2; uv[i + 1] = uv[i + 1] * 2 - 1; }
+  return { ...fig, uv };
+}
+
 // Trilinear blend of the 8 variants; c = [str, dex, height] in 0..1 (MOB "complection").
 export function blendVariants(variants, c = [0.5, 0.5, 0.5]) {
   const [s, d, h] = c, out = new Float32Array(variants[0].length);

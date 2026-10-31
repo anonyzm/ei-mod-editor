@@ -35,7 +35,7 @@ export async function mount(root, [srcArg]) {
   function renderList() {
     const items = st.entries.filter(e => (!st.group || groupOf(e) === st.group) && (!st.filter || e.name.toLowerCase().includes(st.filter) || e.text.toLowerCase().includes(st.filter)));
     list.replaceChildren(h('ul.list', items.slice(0, 800).map(e => h('li', { className: e === st.sel ? 'sel' : '', title: e.name, onclick: () => { st.sel = e; renderList(); renderEditor(); } },
-      e.text.split('\n')[0].slice(0, 60) || e.name, h('small', e.name)))), items.length > 800 ? h('div.muted', `…и ещё ${items.length - 800}`) : null);
+      e.text.split('\n')[0].slice(0, 60) || e.name, h('small.sub', e.name)))), ...(items.length > 800 ? [h('div.muted', `…и ещё ${items.length - 800}`)] : []));
   }
   function renderEditor() {
     const e = st.sel;

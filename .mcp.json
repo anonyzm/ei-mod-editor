@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "ei-editor": { "command": "node", "args": ["C:/GOG Games/EI_edit/Editor/mcp.js"] }
+  }
+}

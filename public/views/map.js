@@ -6,6 +6,7 @@ import { api, h, guard, toast, dirty } from '/app.js';
 import * as M from '/formats/mob.js';
 import { readMpr, writeMpr, updateNormals, markDirty, heightAt } from '/formats/mpr.js';
 import { units } from '/lib/gamedb.js';
+import { gameCatalog as buildCatalog, setupUnit, setupObject } from '/shared/catalog.js';
 import { buildModel, buildTerrain, updateTerrain, retileTerrain, buildWater, loadAtlases, loadModelData } from '/lib/eiscene.js';
 import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRect } from '/formats/aigraph.js';
 
@@ -23,9 +24,17 @@ function guessMpr(mob, mprs) {
   return (names.find(n => key === n) || names.find(n => key.startsWith(n)) || names.find(n => n.startsWith(key.replace(/[-_].*$/, ''))) || names.find(n => n.startsWith(key.slice(0, 5)))) + '.mpr';
 }
 
+// Templates and the catalog of all placed objects, built once from the game's zone maps.
+let catalogP;
+function gameCatalog(mobs) {
+  if (!catalogP) toast('Собираю каталог объектов со всех карт игры…');
+  return (catalogP ??= buildCatalog(api.file, mobs).catch(e => { catalogP = null; throw e; }));
+}
+
 export async function mount(root, [mobArg, mprArg]) {
   const info = await api.info();
   const mobs = info.maps.filter(f => /\.mob$/i.test(f)).sort(), mprs = info.maps.filter(f => /\.mpr$/i.test(f)).sort();
+  const unitInfo = await units();
   const st = { mobFile: mobArg || 'zone1.mob', mob: null, map: null, objects: [], sel: null, selPt: null, mode: 'select', brush: { tool: 'raise', radius: 4, strength: 0.15, tile: 0, rot: 0 }, mobChanged: false, mprChanged: false, filter: '', kind: 0 };
   st.mprFile = mprArg || guessMpr(st.mobFile, mprs);
 
@@ -47,7 +56,7 @@ export async function mount(root, [mobArg, mprArg]) {
   root.append(h('div.work',
     h('div.side',
       h('div.head', h('div.f', { style: { width: '100%', display: 'grid', gap: '4px' } }, h('label', 'Файл объектов (.mob)'), mobSel, h('label', 'Ландшафт (.mpr)'), mprSel)),
-      h('div.head', search, kindSel, h('button', { onclick: addCreature, title: 'Добавить существо из базы данных' }, '+ Существо'), h('button', { onclick: duplicate, title: 'Копия выбранного (Ctrl+D)' }, '⧉ Копия')),
+      h('div.head', search, kindSel, h('button', { onclick: addCreature, title: 'Добавить существо из базы данных' }, '+ Существо'), h('button', { onclick: addObject, title: 'Добавить постройку, дерево, камень… из каталога всех карт' }, '+ Объект'), h('button', { onclick: duplicate, title: 'Копия выбранного (Ctrl+D)' }, '⧉ Копия')),
       listEl),
     h('div.center',
       h('div.toolbar',
@@ -172,11 +181,13 @@ export async function mount(root, [mobArg, mprArg]) {
 
   // ---------- list ----------
   function objLabel(o) { return M.getField(o.node, M.OBJ.name) || M.getField(o.node, M.OBJ.prototype) || '(без имени)'; }
+  // In-game name of a creature (texts.res via its prototype); objects have no translated names.
+  function gameTitle(o) { return o.kind === 0xbbbb0000 ? unitInfo.byName.get((M.getField(o.node, M.UNIT.unitPrototype) || '').toLowerCase())?.title : null; }
   function renderList() {
-    const items = st.objects.filter(o => (!st.kind || o.kind === st.kind) && (!st.filter || objLabel(o).toLowerCase().includes(st.filter) || String(M.getField(o.node, M.OBJ.id)).includes(st.filter)));
+    const items = st.objects.filter(o => (!st.kind || o.kind === st.kind) && (!st.filter || objLabel(o).toLowerCase().includes(st.filter) || gameTitle(o)?.toLowerCase().includes(st.filter) || String(M.getField(o.node, M.OBJ.id)).includes(st.filter)));
     listEl.replaceChildren(h('ul.list', items.slice(0, 600).map(o => h('li', { className: o === st.sel ? 'sel' : '', onclick: () => select(o, true) },
-      h('span.swatch', { style: { background: '#' + (KIND_COLOR[o.kind] || 0xffffff).toString(16).padStart(6, '0') } }), objLabel(o)))),
-    items.length > 600 ? h('div.muted', `…ещё ${items.length - 600}, уточните поиск`) : null);
+      h('span.swatch', { style: { background: '#' + (KIND_COLOR[o.kind] || 0xffffff).toString(16).padStart(6, '0') } }), gameTitle(o) || objLabel(o), gameTitle(o) ? h('small.sub', objLabel(o)) : null))),
+    ...(items.length > 600 ? [h('div.muted', `…ещё ${items.length - 600}, уточните поиск`)] : []));
   }
 
   // ---------- selection & gizmo ----------
@@ -325,7 +336,7 @@ export async function mount(root, [mobArg, mprArg]) {
     const list = (label, spec) => h('div.f', h('label', label, h('small', ' — через запятую')), h('textarea', { rows: 2, value: (M.getField(n, spec) || []).join(', '),
       onchange: e => { M.setField(n, spec, e.target.value.split(',').map(s => s.trim()).filter(Boolean)); markMob(); } }));
     propsEl.replaceChildren(h('div.form',
-      h('h4', o.kindName + ' №' + M.getField(n, M.OBJ.id)),
+      h('h4', gameTitle(o) || objLabel(o), h('small.sub', `${o.kindName} №${M.getField(n, M.OBJ.id)}`)),
       field('Имя на карте', M.OBJ.name, { hint: 'используется в скриптах' }),
       isUnit ? field('Прототип существа (из базы)', M.UNIT.unitPrototype) : null,
       field('Прототип / шаблон', M.OBJ.prototype),
@@ -413,7 +424,12 @@ export async function mount(root, [mobArg, mprArg]) {
 
   // ---------- edit actions ----------
   function toGround(o) { const p = M.getField(o.node, M.OBJ.pos); M.setField(o.node, M.OBJ.pos, [p[0], p[1], 0]); syncFromNode(o); markMob(); renderProps(); }
-  function objectsContainer() { return st.mob.chunks.find(c => c.id === 0xa000).children.find(c => c.id === 0xb000); }
+  function objectsContainer() {
+    const root = st.mob.chunks.find(c => c.id === 0xa000);
+    let b = root.children.find(c => c.id === 0xb000);
+    if (!b) root.children.push(b = { id: 0xb000, children: [] });
+    return b;
+  }
   function insertClone(src, mutate) {
     const copy = M.cloneChunk(src.node);
     const id = M.maxObjectId(st.mob) + 1;
@@ -443,30 +459,49 @@ export async function mount(root, [mobArg, mprArg]) {
     st.objects.splice(st.objects.indexOf(o), 1);
     select(null); markMob();
   }
-  async function addCreature() {
-    const template = st.sel?.kind === 0xbbbb0000 ? st.sel : st.objects.find(o => o.kind === 0xbbbb0000);
-    if (!template) return toast('На этой карте нет ни одного существа-образца. Откройте карту с существами.', 'err');
-    const { prototypes: list } = await units();
-    const dlg = h('dialog', { style: { background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '8px', width: '520px' } });
-    const q = h('input.search', { placeholder: 'Поиск: orc, goblin, Human…', oninput: () => fill() });
-    const ul = h('ul.list', { style: { maxHeight: '50vh', overflow: 'auto' } });
-    const fill = () => ul.replaceChildren(...list.filter(u => u.name.toLowerCase().includes(q.value.toLowerCase())).slice(0, 300).map(u => h('li', { onclick: () => { dlg.close(); place(u); } }, u.name, h('small', u.kind + (u.model ? ' · ' + u.model : '')))));
-    dlg.append(h('h3', { style: { marginTop: 0 } }, 'Добавить существо'), q, ul, h('button', { onclick: () => dlg.close() }, 'Отмена'));
+  // Searchable picker dialog: items [{title, sub, value}] -> onPick(value). `extra` goes under the list.
+  function pickDialog(heading, placeholder, items, onPick, extra) {
+    const dlg = h('dialog', { style: { background: 'var(--panel)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: '8px', width: '560px' } });
+    const close = () => { dlg.close(); dlg.remove(); };
+    const q = h('input.search', { placeholder, oninput: () => fill() });
+    const ul = h('ul.list', { style: { maxHeight: '50vh', overflow: 'auto', margin: '8px 0' } });
+    const fill = () => { const s = q.value.toLowerCase(); ul.replaceChildren(...items.filter(i => !s || i.title.toLowerCase().includes(s) || i.sub.toLowerCase().includes(s)).slice(0, 400).map(i => h('li', { onclick: () => { close(); onPick(i.value); } }, i.title, h('small.sub', i.sub)))); };
+    dlg.append(h('h3', { style: { marginTop: 0 } }, heading), q, ul, extra?.(close) || null, h('div.row', { style: { marginTop: '8px' } }, h('button', { onclick: close }, 'Отмена')));
     document.body.append(dlg); fill(); dlg.showModal(); q.focus();
-    dlg.addEventListener('close', () => dlg.remove());
+    dlg.addEventListener('close', () => dlg.remove()); // Esc
+  }
+  // Template chunk of a kind: the selected/any one on this map, else the first one found in other maps.
+  async function templateOf(kind) {
+    const here = st.sel?.kind === kind ? st.sel : st.objects.find(o => o.kind === kind);
+    if (here) return here;
+    const t = (await gameCatalog(mobs)).templates.get(kind);
+    return t && { node: t, kind, kindName: M.KINDS[kind], parent: null };
+  }
+  async function addCreature() {
+    const template = await templateOf(0xbbbb0000);
+    if (!template) return toast('Не нашлось ни одного существа ни на одной карте игры', 'err');
+    pickDialog('Добавить существо', 'Поиск по названию: гоблин, орк, Human…',
+      unitInfo.prototypes.map(u => ({ title: u.title || u.name, sub: [u.title ? u.name : null, u.kind, u.model].filter(Boolean).join(' · '), value: u })), place);
     function place(u) {
       const t = controls.target;
-      insertClone(template, (c, id) => {
-        M.setField(c, M.UNIT.unitPrototype, u.name); M.setField(c, M.OBJ.prototype, u.name);
-        M.setField(c, M.OBJ.name, `${u.name}-${id}`);
-        if (u.model) M.setField(c, M.OBJ.model, u.model);
-        if (u.texture) M.setField(c, M.OBJ.texture, u.texture);
-        if (u.complection) M.setField(c, M.OBJ.complection, u.complection);
-        M.setField(c, M.OBJ.pos, [t.x, t.y, 0]);
-        // a fresh unit starts without the template's patrol route
-        for (const logic of c.children.filter(x => x.id === 0xbbbc0000)) logic.children = logic.children.filter(x => x.id !== 0xbbbd0000);
-      });
-      toast(`Добавлено: ${u.name}. Оно стоит в центре экрана — передвиньте его.`);
+      insertClone(template, (c, id) => setupUnit(c, u, id, [t.x, t.y, 0]));
+      toast(`Добавлено: ${u.title || u.name}. Оно стоит в центре экрана — передвиньте его.`);
+    }
+  }
+  async function addObject() {
+    const template = await templateOf(0xb001);
+    if (!template) return toast('Не нашлось ни одного объекта ни на одной карте игры', 'err');
+    const { objects } = await gameCatalog(mobs);
+    const custom = close => {
+      const model = h('input', { placeholder: 'модель (например, своя из OBJ)' }), tex = h('input', { placeholder: 'текстура' });
+      return h('div.form', h('label', 'Или своя модель из «Модели и анимации»:'), h('div.row', model, tex,
+        h('button', { onclick: () => { if (!model.value.trim()) return; close(); place({ proto: model.value.trim(), model: model.value.trim(), texture: tex.value.trim() || model.value.trim() }); } }, 'Поставить')));
+    };
+    pickDialog('Добавить объект', 'Поиск: tree, house, bridge, fence…', objects.map(o => ({ title: o.proto, sub: `${o.model} · ${o.texture} · встречается ${o.count} раз`, value: o })), place, custom);
+    function place(o) {
+      const t = controls.target;
+      insertClone(template, (c, id) => setupObject(c, o, id, [t.x, t.y, 0]));
+      toast(`Добавлено: ${o.proto}. Объект стоит в центре экрана — передвиньте его.`);
     }
   }
 

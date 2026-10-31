@@ -7,12 +7,13 @@ import assert from 'node:assert/strict';
 import { readRes, writeRes, isRes } from '../src/formats/res.js';
 import { readReg, writeReg, regToText, textToReg } from '../src/formats/reg.js';
 import { parseSchema, dbForFile, readDatabase, writeDatabase, fieldView, textToField } from '../src/formats/db.js';
-import { readMob, writeMob, getScript, setScript, listObjects, codec, walk, getField, OBJ } from '../src/formats/mob.js';
+import { readMob, writeMob, getScript, setScript, listObjects, codec, walk, getField, OBJ, cloneChunk } from '../src/formats/mob.js';
 import { readMpr, writeMpr, newMpr } from '../src/formats/mpr.js';
 import { decodeMmp, encodeMmpArgb8 } from '../src/formats/mmp.js';
 import { readModel, readAnimations, readFig, writeFig, readBon, writeBon, writeModel, figGeometry } from '../src/formats/fig.js';
 import { objToParts } from '../src/formats/obj.js';
 import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRect } from '../src/formats/aigraph.js';
+import { gameCatalog, setupUnit, setupObject } from '../src/shared/catalog.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cfg = (() => { try { return JSON.parse(fs.readFileSync(path.join(here, '..', 'config.json'), 'utf8')); } catch { return {}; } })();
@@ -151,6 +152,18 @@ check('AI graph: builder agrees with the original on >= 85% of human-class edges
   for (let i = 0; i < a.length; i++) if ((a[i] === 0xffff) === (b[i] === 0xffff)) ok++;
   assert.ok(ok / a.length >= 0.85, `${(100 * ok / a.length).toFixed(1)}%`);
   return `${(100 * ok / a.length).toFixed(1)}% of edges`;
+});
+
+const catalog = await gameCatalog(rel => Promise.resolve(read(rel)), maps);
+check('Catalog: a creature and an object can be added to an empty map', () => {
+  assert.ok(catalog.objects.length > 100 && catalog.templates.has(0xbbbb0000) && catalog.templates.has(0xb001));
+  const mob = readMob(read('Maps/zone7chest.mob')), root = mob.chunks.find(c => c.id === 0xa000);
+  const b = root.children.find(c => c.id === 0xb000);
+  b.children.push(setupUnit(cloneChunk(catalog.templates.get(0xbbbb0000)), { name: 'GoblinA1', model: 'unmogo' }, 9001, [1, 2, 0]),
+    setupObject(cloneChunk(catalog.templates.get(0xb001)), catalog.objects[0], 9002, [3, 4, 0]));
+  const back = listObjects(readMob(writeMob(mob)));
+  assert.deepEqual(back.filter(o => o.kind !== 0xbbac0000).map(o => getField(o.node, OBJ.name)), ['GoblinA1-9001', `${catalog.objects[0].proto}-9002`]);
+  return `${catalog.objects.length} object types`;
 });
 
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll checks passed');

@@ -46,11 +46,11 @@ export async function mount(root, [nameArg]) {
   });
 
   function renderList() {
-    const items = models.filter(m => !st.filter || m.includes(st.filter));
+    const items = models.filter(m => !st.filter || m.includes(st.filter) || modelTitle.get(m)?.toLowerCase().includes(st.filter));
     const groups = {};
     for (const m of items) (groups[PREFIX[m.slice(0, 2)] || 'Прочее'] ??= []).push(m);
     list.replaceChildren(h('ul.list', Object.entries(groups).map(([g, ms]) => [h('li.group', `${g} (${ms.length})`),
-      ms.slice(0, 400).map(m => h('li', { className: m === st.name ? 'sel' : '', onclick: () => load(m) }, m, anims.has(m) ? h('small', '▶ анимации') : null))])));
+      ms.slice(0, 400).map(m => h('li', { className: m === st.name ? 'sel' : '', onclick: () => load(m) }, modelTitle.get(m) || m, h('small.sub', [modelTitle.has(m) ? m : null, anims.has(m) ? '▶ анимации' : null].filter(Boolean).join(' · ') || null)))])));
   }
 
   async function load(name) {
@@ -64,7 +64,10 @@ export async function mount(root, [nameArg]) {
     st.anims = anims.has(name) ? await guard(async () => readAnimations(await api.resEntry('Res/figures.res', name + '.anm'))) || [] : [];
     renderRight();
   }
-  const { raceByModel } = await units();
+  const { raceByModel, prototypes } = await units();
+  // creature models get the in-game name of the first creature that uses them
+  const modelTitle = new Map();
+  for (const p of prototypes) if (p.model && p.title && !modelTitle.has(p.model.toLowerCase())) modelTitle.set(p.model.toLowerCase(), p.title);
   function guessTexture(name) {
     const race = raceByModel.get(name);
     if (race?.textures.length) return race.textures[0];

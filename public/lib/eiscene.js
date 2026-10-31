@@ -3,7 +3,8 @@
 import * as THREE from 'three';
 import { api } from '/app.js';
 import { decodeMmp } from '/formats/mmp.js';
-import { readModel, figGeometry, blendVariants } from '/formats/fig.js';
+import { readModel, readFig, unpackItemUv, figGeometry, blendVariants } from '/formats/fig.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { heightAt, waterHeightAt } from '/formats/mpr.js';
 
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -38,6 +39,54 @@ export function loadModelData(name) {
   }
   return modelCache.get(key);
 }
+// Item models are single FIG files in figures.res (<name>.fig), not .mod sets.
+const figCache = new Map();
+export function loadFigModel(name) {
+  const key = name.toLowerCase();
+  if (!figCache.has(key)) figCache.set(key, api.resEntry('Res/figures.res', key + '.fig').then(u8 => ({ parts: [{ name: key, parent: '', fig: unpackItemUv(key, readFig(u8)), bon: null }] })).catch(() => null));
+  return figCache.get(key);
+}
+
+// Small picture of a texture (icons) as a data URL, cached.
+const urlCache = new Map();
+export function textureDataUrl(name) {
+  const key = name.toLowerCase();
+  if (!urlCache.has(key)) urlCache.set(key, api.resEntry('Res/textures.res', key + '.mmp').then(u8 => {
+    const img = decodeMmp(u8), c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    c.getContext('2d').putImageData(new ImageData(img.rgba, img.width, img.height), 0, 0);
+    return c.toDataURL();
+  }).catch(() => null));
+  return urlCache.get(key);
+}
+
+// A small embedded 3D viewer: preview.show(object3d) frames it; preview.dispose() when the view goes away.
+export function createPreview(container) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(devicePixelRatio);
+  container.append(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x444033, 2.2));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(2, -3, 4); scene.add(sun);
+  const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 500), controls = new OrbitControls(camera, renderer.domElement);
+  controls.autoRotate = true; controls.autoRotateSpeed = 3;
+  let current = null;
+  const ro = new ResizeObserver(() => { const r = container.getBoundingClientRect(); renderer.setSize(r.width, r.height, false); camera.aspect = r.width / Math.max(1, r.height); camera.updateProjectionMatrix(); });
+  ro.observe(container);
+  renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+  return {
+    show(obj) {
+      if (current) scene.remove(current);
+      current = obj;
+      if (!obj) return;
+      scene.add(obj);
+      const box = new THREE.Box3().setFromObject(obj), c = box.getCenter(new THREE.Vector3()), r = Math.max(0.05, box.getSize(new THREE.Vector3()).length());
+      controls.target.copy(c); camera.position.copy(c).add(new THREE.Vector3(r * 0.7, -r * 1.3, r * 0.6));
+    },
+    dispose() { ro.disconnect(); renderer.setAnimationLoop(null); renderer.dispose(); },
+  };
+}
+
 // After a model/texture with this name was (re)written to the game files.
 export function forgetCached(name) {
   modelCache.delete(name.toLowerCase());
