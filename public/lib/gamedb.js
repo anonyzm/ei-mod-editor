@@ -4,6 +4,7 @@ import { api } from '/app.js';
 import { readRes } from '/formats/res.js';
 import { cp1251 } from '/formats/bytes.js';
 import { parseSchema, dbForFile, readDatabase, fieldView } from '/formats/db.js';
+import { raceTexture } from '/shared/catalog.js';
 
 let schemaP, unitsP, textsP, texListP;
 
@@ -49,7 +50,7 @@ export function units() {
     const e = readRes(await api.file('Res/database.res')).find(x => x.name === 'units.udb');
     const db = dbForFile(S, 'units.udb'), d = readDatabase(e.data, db);
     const val = (rec, tid, fid) => { const f = rec.children.find(c => c.id === fid); return f?.data ? fieldView(db.types[tid][fid], f.data).text : ''; };
-    const raceList = d.tables.find(x => x.id === 2).records.map(r => ({ name: val(r, 2, 0), model: val(r, 2, 30), textures: val(r, 2, 31).split(/[;,]/).map(s => s.trim()).filter(Boolean) }));
+    const raceList = d.tables.find(x => x.id === 2).records.map(r => ({ name: val(r, 2, 0), model: val(r, 2, 30), textures: [raceTexture(val(r, 2, 30), val(r, 2, 31))] }));
     const races = new Map(raceList.map(r => [r.name.toLowerCase(), r]));
     const prototypes = [];
     for (const r of d.tables.find(x => x.id === 3).records) {
@@ -97,7 +98,7 @@ export async function recordInfo(db, tableId, val) {
   else if (key === 'Items:6') { const t = firstTex('litem' + pad(tti, 3)); item(`initlitr${tti}item`, t, t); }
   else if (key === 'Spells:1') out.icon = firstTex('spell' + pad(val(18), 4));
   else if (key === 'Units:3' || key === 'Units:4') { const p = (await units()).byName.get(val(0).toLowerCase()); if (p?.model) out.model = { name: p.model, texture: p.texture, complection: p.complection }; }
-  else if (key === 'Units:2' && val(30)) out.model = { name: val(30), texture: val(31).split(/[;,]/)[0].trim() };
+  else if (key === 'Units:2' && val(30)) out.model = { name: val(30), texture: raceTexture(val(30), val(31)) };
   if (out.icon && !tex.includes(out.icon)) out.icon = null;
   return out;
 }

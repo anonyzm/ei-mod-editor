@@ -79,6 +79,15 @@ try {
     const after = await call('terrain_info', { mpr: 'mcptest' });
     assert.ok(after.most_used_tiles.every(t => grass.includes(t.tile) || t.tile === 1), 'painted grass');
     await call('terrain_sculpt', { mpr: 'mcptest', ops: [{ tool: 'nope', x: 1, y: 1 }] }, { error: true });
+    const stone = Object.entries(info.tiles_by_type).find(([k]) => k.includes('stone'))[1];
+    const at = await call('terrain_autotile', { mpr: 'mcptest', classes: { grass: grass.slice(0, 4), stone: stone.slice(0, 2) }, ops: [{ x: 64, y: 64, radius: 16, class: 'stone' }] });
+    assert.ok(at.transition_tiles > 0 && at.transition_tiles < at.tiles, 'autotile ' + JSON.stringify(at));
+    // centre is a 10 m hill, the corner is at 1 m: a 3 m lake must fill the corner only
+    await call('terrain_water', { mpr: 'mcptest', ops: [{ x0: 0, y0: 0, x1: 128, y1: 128, level: 3, material: 'lava', tile: 1 }] });
+    const w = (await call('terrain_info', { mpr: 'mcptest' })).water_tiles;
+    assert.ok(w > 0 && w < 64 * 64, 'water tiles ' + w);
+    await call('terrain_water', { mpr: 'mcptest', ops: [{ x0: 0, y0: 0, x1: 128, y1: 128, remove: true }] });
+    assert.equal((await call('terrain_info', { mpr: 'mcptest' })).water_tiles, 0);
   });
   await check('terrain_render + heightmap + tile import', async () => {
     const img = await call('terrain_render', { mpr: 'zone1', mob: 'zone1', size: 256 });
@@ -97,6 +106,14 @@ try {
     assert.deepEqual(mv.pos.slice(0, 2), [70, 72]); assert.equal(mv.name, 'boss');
     const pt = await call('map_patrol_set', { mob: 'mcptest', id: u.id, points: [[70, 80], [80, 80]] });
     assert.equal(pt.patrols[0].points.length, 2); assert.ok(pt.patrols[0].points[0].pos[2] > 0, 'patrol z from ground');
+    const pt2 = await call('map_patrol_set', { mob: 'mcptest', id: u.id, points: [[70, 80], { pos: [80, 80], wait: 90, param: 5 }, [90, 85]], edit: [{ index: 2, wait: 3600, flag: 1 }] });
+    assert.deepEqual(pt2.patrols[0].points.map(p => [p.wait, p.param, p.flag]), [[15, 0, 0], [90, 5, 0], [3600, 0, 1]]);
+    await call('map_patrol_set', { mob: 'mcptest', id: u.id, edit: [{ index: 9, wait: 1 }] }, { error: true });
+    assert.ok(/default0/.test((await call('map_object_add', { mob: 'mcptest', unit: 'Human Gipath Runner Male F1', fields: { pos: [62, 62] } })).texture), 'humans use default0');
+    const batch = await call('map_object_add', { mob: 'mcptest', items: [{ object: 'FirTree00', fields: { pos: [20, 20] } }, { unit: 'WolfGreyF1', fields: { pos: [24, 20] } }] });
+    assert.equal(batch.added, 2);
+    await call('map_object_add', { mob: 'mcptest', items: [{ object: 'FirTree00', fields: { pos: [30, 30] } }, { object: 'NoSuchThing', fields: { pos: [1, 1] } }] }, { error: true });
+    assert.equal((await call('map_objects', { mob: 'mcptest', near: [30, 30, 0.5] })).total, 0, 'failed batch saves nothing');
     const cat = await call('objects_catalog', { limit: 1 }); assert.ok(cat.total > 100, 'catalog');
     const tree = await call('map_object_add', { mob: 'mcptest', object: cat.objects[0].proto, fields: { pos: [90, 90], yaw: 45 } });
     assert.ok(tree.path_graph_nodes_rebuilt > 0 && tree.kind === 'object', 'static object on a new zone');
@@ -112,6 +129,19 @@ try {
     await call('map_script_set', { mob: 'mcptest', script: s.replace('Sleep( 1 )', 'Sleep( 2 )') });
     assert.ok((await call('map_script_get', { mob: 'mcptest' })).includes('Sleep( 2 )'));
     assert.ok((await call('map_script_get', { mob: 'zone1' })).includes('z.mcptest'), 'exit opened in linked zone');
+  });
+  await check('globe + zone maps', async () => {
+    const gi = await call('globe_info', { allod: 'gipat' });
+    assert.ok(gi.parts.some(p => p.zones.includes('gz5g')) && /u = 0\.12/.test(gi.uv), 'globe ' + gi.uv);
+    const gz = await call('globe_zone', { zone: 'mcptest', x: 1.07, y: 0, w: 0.7, h: 0.5 });
+    assert.ok(gz.triangles > 100 && gz.edges.length > 0, JSON.stringify(gz));
+    assert.ok((await call('zone_get', { id: 'mcptest' })).includes('#figure\n' + gz.figure));
+    assert.ok((await call('globe_info', { allod: 'gipat' })).parts.some(p => p.figure === gz.figure && !p.original));
+    await call('globe_zone', { zone: 'mcptest', x: 9, y: 9, w: 0.5, h: 0.5 }, { error: true }); // sea
+    const zm = await call('zone_maps', { zone: 'mcptest' });
+    assert.ok(zm.minimap && zm.objectives, JSON.stringify(zm));
+    const tc = await call('terrain_tile_import', { mpr: 'mcptest', tile: 6, from_mpr: 'zone5_1', from_tile: 64 });
+    assert.ok((await call('terrain_info', { mpr: 'mcptest' })).tiles_by_type['6 вода (water)']?.includes(6), 'copied tile keeps its type ' + JSON.stringify(tc));
   });
   await check('models + textures', async () => {
     const ms = await call('models_list', { limit: 1 });

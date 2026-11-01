@@ -5,19 +5,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { exec } from 'node:child_process';
-import { HERE, GAME, gamePath, loadRes, resEntry, resUpdate, readGameFile, saveGameFile, listDir, listBackups, restore } from './src/game.js';
+import { HERE, GAME, BACKUP, gamePath, loadRes, resEntry, resUpdate, readGameFile, saveGameFile, listDir, listBackups, restore } from './src/game.js';
 import { cp1251 } from './src/formats/bytes.js';
 import { readRes } from './src/formats/res.js';
 import { readReg, writeReg, regToText, textToReg } from './src/formats/reg.js';
 import { parseSchema, dbForFile, readDatabase, writeDatabase, fieldView, textToField } from './src/formats/db.js';
 import * as M from './src/formats/mob.js';
-import { readMpr, writeMpr, updateNormals, markDirty, heightAt, TILE_TYPES } from './src/formats/mpr.js';
+import { readMpr, writeMpr, updateNormals, markDirty, heightAt, packNormal, TILE_TYPES } from './src/formats/mpr.js';
 import { decodeMmp, mmpInfo, encodeMmpArgb8 } from './src/formats/mmp.js';
-import { readModel, writeModel } from './src/formats/fig.js';
+import { readModel, writeModel, readFig, writeFig, readLnk, writeLnk } from './src/formats/fig.js';
 import { objToParts } from './src/formats/obj.js';
 import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRect } from './src/formats/aigraph.js';
 import { loadWorld, saveWorld, createZone, directive, exitsOf, ISLAND } from './src/shared/world.js';
-import { gameCatalog, setupUnit, setupObject } from './src/shared/catalog.js';
+import { gameCatalog, setupUnit, setupObject, raceTexture } from './src/shared/catalog.js';
 import { encodePng, decodePng, resizeRgba } from './src/png.js';
 
 // ---------------- game access ----------------
@@ -109,7 +109,7 @@ const saveDb = (D, f) => resUpdate(D.res, [{ name: f.name, data: writeDatabase(f
 function unitPrototypes() {
   const D = loadDb('sp'), f = D.files.get('units.udb'), db = f.db, d = f.data;
   const val = (rec, tid, fid) => { const c = rec.children.find(x => x.id === fid); return c?.data ? fieldView(db.types[tid][fid], c.data).text : ''; };
-  const races = new Map(d.tables.find(x => x.id === 2).records.map(r => [val(r, 2, 0).toLowerCase(), { model: val(r, 2, 30), textures: val(r, 2, 31).split(/[;,]/).map(s => s.trim()).filter(Boolean) }]));
+  const races = new Map(d.tables.find(x => x.id === 2).records.map(r => [val(r, 2, 0).toLowerCase(), { model: val(r, 2, 30), textures: [raceTexture(val(r, 2, 30), val(r, 2, 31))] }]));
   const out = [];
   for (const r of d.tables.find(x => x.id === 3).records) {
     const race = races.get(val(r, 3, 1).toLowerCase()) || {}, cx = [5, 6, 7].map(i => +val(r, 3, i));
@@ -139,7 +139,7 @@ function objDetails(o) {
   const g = s => M.getField(o.node, s), out = { ...objSummary(o), texture: g(M.OBJ.texture) || '', complection: (g(M.OBJ.complection) || []).map(r2), player: g(M.OBJ.player), quest_info: g(M.QUEST_INFO) || '', visible: g(M.OBJ.visible), use_in_script: g(M.OBJ.useInScript) };
   if (o.kind === UNIT) {
     for (const [k, s] of Object.entries({ weapons: M.UNIT.weapons, armors: M.UNIT.armors, spells: M.UNIT.spells, quick_items: M.UNIT.quickItems, quest_items: M.UNIT.questItems })) out[k] = g(s) || [];
-    out.patrols = M.getPatrols(o.node).map(p => ({ guard: p.guard?.map(r2) || null, points: p.points.map(w => ({ pos: w.pos.map(r2), wait: w.wait })) }));
+    out.patrols = M.getPatrols(o.node).map(p => ({ guard: p.guard?.map(r2) || null, points: p.points.map(w => ({ pos: w.pos.map(r2), wait: w.wait, param: r2(w.param), flag: w.flag })) }));
   }
   return out;
 }
@@ -284,12 +284,73 @@ function atlasImages(map) {
 // Colour of the ground at world (x, y), same UV mapping as the 3D view (public/lib/eiscene.js).
 function groundColor(map, atl, x, y) {
   const tx = Math.min(map.TW - 1, Math.max(0, Math.floor(x / 2))), ty = Math.min(map.TH - 1, Math.max(0, Math.floor(y / 2)));
-  const tile = map.tiles[ty * map.TW + tx], img = atl[(tile >> 6) & 255], local = tile & 63;
+  return tileTexel(atl, map.tiles[ty * map.TW + tx], (x - tx * 2) / 2, (y - ty * 2) / 2);
+}
+// Colour of tile code (with rotation bits) at tile-local u (east) and w (north), 0…1.
+function tileTexel(atl, tile, uw, ww) {
+  const img = atl[(tile >> 6) & 255], local = tile & 63;
   if (!img) return [100, 120, 85];
-  let u = Math.min(0.999, Math.max(0, (x - tx * 2) / 2)), v = 1 - Math.min(0.999, Math.max(0, (y - ty * 2) / 2));
+  let u = Math.min(0.999, Math.max(0, uw)), v = 1 - Math.min(0.999, Math.max(0, ww));
   for (let r = 0; r < tile >> 14; r++) [u, v] = [v, 1 - u];
   const px = (local & 7) * 64 + 8 + Math.floor(u * 48), py = (7 - (local >> 3)) * 64 + 8 + Math.floor(v * 48), o = (py * img.width + px) * 4;
   return [img.rgba[o], img.rgba[o + 1], img.rgba[o + 2]];
+}
+
+// ---- autotiling: tiles are chosen so their corner colours match the ground class of each 2 m vertex ----
+// Original maps blend ground types with the atlases' transition tiles; neighbouring tiles agree in colour
+// at shared corners (median spread ~6 RGB on zone1), which this reproduces.
+const PATCH = 0.2; // corner patch, fraction of a tile
+function tileProbe(atl, tile) { // mean colour of [SW, SE, NE, NW corner, centre]
+  const at = (u0, w0) => { const s = [0, 0, 0]; for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) { const c = tileTexel(atl, tile, u0 + (i + 0.5) / 5 * PATCH, w0 + (j + 0.5) / 5 * PATCH); s[0] += c[0]; s[1] += c[1]; s[2] += c[2]; } return s.map(v => v / 25); };
+  const e = 1 - PATCH, m = 0.5 - PATCH / 2;
+  return [at(0, 0), at(e, 0), at(e, e), at(0, e), at(m, m)];
+}
+const rgbDist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+function autotile(map, classes, ops, rect) {
+  const atl = atlasImages(map), names = Object.keys(classes), VW = map.TW + 1, VH = map.TH + 1;
+  if (!names.length) fail('classes: {"имя": [тайлы…]}');
+  const probes = new Map(), probe = t => probes.get(t) ?? (probes.set(t, tileProbe(atl, t)), probes.get(t));
+  const target = names.map(n => {
+    const pool = classes[n]; if (!Array.isArray(pool) || !pool.length) fail(`classes.${n}: список тайлов`);
+    const s = [0, 0, 0]; let k = 0;
+    for (const t of pool) { if (!(t >= 0 && t < map.textures * 64)) fail(`Тайл ${t} вне атласов`); for (const c of probe(t)) { s[0] += c[0]; s[1] += c[1]; s[2] += c[2]; k++; } }
+    return s.map(v => v / k);
+  });
+  const nearest = c => { let b = 0; for (let i = 1; i < target.length; i++) if (rgbDist(c, target[i]) < rgbDist(c, target[b])) b = i; return b; };
+  // vertex classes: from the current tiles, then the ops
+  const vc = new Int8Array(VW * VH);
+  for (let j = 0; j < VH; j++) for (let i = 0; i < VW; i++) {
+    const s = [0, 0, 0]; let k = 0;
+    for (const [dx, dy, corner] of [[-1, -1, 2], [0, -1, 3], [0, 0, 0], [-1, 0, 1]]) {
+      const tx = i + dx, ty = j + dy; if (tx < 0 || ty < 0 || tx >= map.TW || ty >= map.TH) continue;
+      const c = probe(map.tiles[ty * map.TW + tx])[corner]; s[0] += c[0]; s[1] += c[1]; s[2] += c[2]; k++;
+    }
+    vc[j * VW + i] = nearest(s.map(v => v / k));
+  }
+  for (const op of ops) {
+    const ci = names.indexOf(op.class); if (ci < 0) fail(`class: ${names.join(', ')}`);
+    const s = shapeOf({ radius: 2, ...op }, map);
+    for (let j = Math.max(0, Math.floor(s.y0 / 2)); j <= Math.min(VH - 1, Math.ceil(s.y1 / 2)); j++)
+      for (let i = Math.max(0, Math.floor(s.x0 / 2)); i <= Math.min(VW - 1, Math.ceil(s.x1 / 2)); i++) if (s.w(i * 2, j * 2) > 0) vc[j * VW + i] = ci;
+  }
+  // candidates for mixed cells: every land tile of the atlases in 4 rotations
+  const cands = [];
+  for (let t = 0; t < map.textures * 64; t++) if (atl[t >> 6] && map.tileTypes[t] !== 6 && map.tileTypes[t] !== 13) for (let r = 0; r < 4; r++) cands.push((r << 14) | t);
+  // uniform areas also use look-alike variants from all atlases (originals use ~500 distinct tiles per zone)
+  const pools = names.map((n, ci) => [...new Set([...classes[n], ...cands.filter(c => c < 1 << 14 && probe(c).every(p => rgbDist(p, target[ci]) < 20) && probe(c).reduce((s, p) => s + rgbDist(p, target[ci]), 0) < 5 * 11)])]);
+  const [tx0, ty0, tx1, ty1] = [Math.max(0, Math.floor(rect[0] / 2)), Math.max(0, Math.floor(rect[1] / 2)), Math.min(map.TW - 1, Math.floor(rect[2] / 2)), Math.min(map.TH - 1, Math.floor(rect[3] / 2))];
+  let mixed = 0, err = 0;
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+    const k = [vc[ty * VW + tx], vc[ty * VW + tx + 1], vc[(ty + 1) * VW + tx + 1], vc[(ty + 1) * VW + tx]];
+    if (k.every(c => c === k[0])) { const pool = pools[k[0]]; map.tiles[ty * map.TW + tx] = (Math.floor(hash(ty, tx, 3) * 4) << 14) | pool[Math.floor(hash(tx, ty, 7) * pool.length)]; continue; }
+    let best = Infinity; const scored = [];
+    for (const c of cands) { const p = probe(c); const s = rgbDist(p[0], target[k[0]]) + rgbDist(p[1], target[k[1]]) + rgbDist(p[2], target[k[2]]) + rgbDist(p[3], target[k[3]]); scored.push(s); if (s < best) best = s; }
+    const ok = []; for (let i = 0; i < cands.length; i++) if (scored[i] <= best * 1.08 + 4) ok.push(cands[i]);
+    map.tiles[ty * map.TW + tx] = ok[Math.floor(hash(tx, ty, 11) * ok.length)];
+    mixed++; err += best / 4;
+  }
+  markDirty(map, tx0 * 2 - 2, ty0 * 2 - 2, tx1 * 2 + 4, ty1 * 2 + 4);
+  return { tiles: (tx1 - tx0 + 1) * (ty1 - ty0 + 1), transition_tiles: mixed, mean_corner_error: mixed ? Math.round(err / mixed) : 0, pool_sizes: Object.fromEntries(names.map((n, i) => [n, pools[i].length])) };
 }
 
 // ---------------- tools ----------------
@@ -418,7 +479,8 @@ tool('objects_catalog', 'Каталог статичных объектов со
   const q = (a.query || '').toLowerCase(), all = (await catalog()).objects.filter(o => !q || o.proto.toLowerCase().includes(q) || o.model.toLowerCase().includes(q));
   return { total: all.length, objects: all.slice(0, a.limit ?? 100) };
 });
-tool('map_object_add', 'Добавить объект на любую карту, даже пустую новую: существо из базы (unit: прототип из units_list — модель, текстура и телосложение по расе), статичный объект из каталога (object: прототип или модель из objects_catalog, или своя импортированная модель) или копию объекта этой карты (copy_of: id).', { mob: MOB, mpr: MPR, unit: S.str('Прототип существа'), object: S.str('Прототип или модель статичного объекта'), copy_of: S.int('id объекта-образца на этой карте'), fields: S.obj('Поля нового объекта; pos обязательно для unit и object', { properties: OBJ_FIELDS }) }, ['mob'], a => editMob(a, async ({ mob, mark }) => {
+// One new object from spec {unit | object | copy_of, fields} (as map_object_add).
+async function addObject(mob, mark, a) {
   const id = M.maxObjectId(mob) + 1, pos = a.fields?.pos ? [a.fields.pos[0], a.fields.pos[1], a.fields.pos[2] ?? 0] : null;
   let node, kind, parent;
   if (a.copy_of !== undefined) {
@@ -445,6 +507,12 @@ tool('map_object_add', 'Добавить объект на любую карту
   applyObjFields(o, a.fields || {});
   await mark(o);
   return objDetails(o);
+}
+tool('map_object_add', 'Добавить объект на любую карту, даже пустую новую: существо из базы (unit: прототип из units_list — модель, текстура и телосложение по расе), статичный объект из каталога (object: прототип или модель из objects_catalog, или своя импортированная модель) или копию объекта этой карты (copy_of: id). Много объектов сразу — items: [{unit | object | copy_of, fields}, …] (одно сохранение файла вместо сотен вызовов).', { mob: MOB, mpr: MPR, unit: S.str('Прототип существа'), object: S.str('Прототип или модель статичного объекта'), copy_of: S.int('id объекта-образца на этой карте'), fields: S.obj('Поля нового объекта; pos обязательно для unit и object', { properties: OBJ_FIELDS }), items: S.arr('Пакет: [{unit | object | copy_of, fields}, …]', { type: 'object' }) }, ['mob'], a => editMob(a, async ({ mob, mark }) => {
+  if (!a.items) return addObject(mob, mark, a);
+  const added = [];
+  for (const [i, it] of a.items.entries()) { try { added.push((await addObject(mob, mark, it)).id); } catch (e) { fail(`items[${i}]: ${e.message} (ничего не сохранено)`); } }
+  return { added: added.length, ids: added };
 }));
 tool('map_object_delete', 'Удалить объект. Если скрипт карты ссылается на его имя, скрипт сломается — проверьте map_script_get.', { mob: MOB, mpr: MPR, id: S.int('') }, ['mob', 'id'], a => editMob(a, async ({ mob, mark }) => {
   const o = findObj(mob, a.id), name = M.getField(o.node, M.OBJ.name);
@@ -452,15 +520,23 @@ tool('map_object_delete', 'Удалить объект. Если скрипт к
   o.parent.children.splice(o.parent.children.indexOf(o.node), 1);
   return { deleted: a.id, name };
 }));
-tool('map_patrol_set', 'Задать маршрут патруля существа: точки [x, y] в метрах (высота берётся с земли). Заменяет старые точки. Существо должно иметь блок поведения (обычно есть у существ на картах).', { mob: MOB, mpr: MPR, id: S.int('id существа'), points: S.arr('[[x, y], …]', { type: 'array', items: { type: 'number' } }), wait: S.int('Ожидание в точке, по умолчанию 15'), guard: S.arr('Точка охраны [x, y] (необязательно)', { type: 'number' }) }, ['mob', 'id', 'points'], a => editMob(a, async ({ mob, gz }) => {
+tool('map_patrol_set', 'Маршрут патруля существа. points — новый маршрут целиком: точка [x, y] или {pos: [x, y], wait, param, flag} (высота берётся с земли); [] — убрать маршрут. edit — поправить отдельные точки, не трогая остальные: [{index, pos?, wait?, param?, flag?}]. wait — ожидание в точке (в оригиналах чаще 30…150, 3600 — стоять долго); param и flag — малоизученные поля (почти всегда 0). guard — точка охраны [x, y]. Существо должно иметь блок поведения (он есть у существ, добавленных map_object_add).', { mob: MOB, mpr: MPR, id: S.int('id существа'), points: S.arr('[[x, y] | {pos, wait, param, flag}, …]', {}), edit: S.arr('[{index, pos?, wait?, param?, flag?}]', { type: 'object' }), wait: S.int('Ожидание по умолчанию для точек без wait, 15'), guard: S.arr('Точка охраны [x, y] (необязательно)', { type: 'number' }) }, ['mob', 'id'], a => editMob(a, async ({ mob, gz }) => {
   const o = findObj(mob, a.id);
   if (o.kind !== UNIT) fail('Это не существо');
   const logic = o.node.children.find(c => c.id === 0xbbbc0000) || fail('У существа нет блока поведения — скопируйте патрульного с другой карты (map_object_add copy_of)');
   let p = logic.children.find(c => c.id === 0xbbbd0000);
-  const pos = M.getField(o.node, M.OBJ.pos);
-  if (!p) { p = { id: 0xbbbd0000, children: [{ id: 0xbbbd0001, data: M.codec.vec3.set([pos[0], pos[1], gz(pos[0], pos[1])]) }] }; logic.children.push(p); M.setField(logic, [0xbbbc0003, 'u32'], 2); }
-  if (a.guard) M.setField(p, [0xbbbd0001, 'vec3'], [a.guard[0], a.guard[1], gz(a.guard[0], a.guard[1])]);
-  p.children = p.children.filter(c => c.id !== 0xbbbe0000).concat(a.points.map(([x, y]) => M.newWaypoint([x, y, gz(x, y)], a.wait ?? 15)));
+  const pos = M.getField(o.node, M.OBJ.pos), at = xy => (Array.isArray(xy) && xy.length >= 2 && xy.every(Number.isFinite) ? [xy[0], xy[1], gz(xy[0], xy[1])] : fail('Точка: [x, y]'));
+  if (!p && (a.points?.length || a.guard)) { p = { id: 0xbbbd0000, children: [{ id: 0xbbbd0001, data: M.codec.vec3.set(at(pos)) }] }; logic.children.push(p); M.setField(logic, [0xbbbc0003, 'u32'], 2); }
+  if (!p) fail('У существа нет маршрута — задайте points');
+  if (a.guard) M.setField(p, [0xbbbd0001, 'vec3'], at(a.guard));
+  if (a.points) p.children = p.children.filter(c => c.id !== 0xbbbe0000).concat(a.points.map(pt => Array.isArray(pt)
+    ? M.newWaypoint(at(pt), a.wait ?? 15)
+    : M.newWaypoint(at(pt.pos), pt.wait ?? a.wait ?? 15, pt.param ?? 0, pt.flag ?? 0)));
+  const wps = p.children.filter(c => c.id === 0xbbbe0000);
+  for (const e of a.edit || []) {
+    const w = wps[e.index] || fail(`Нет точки №${e.index} (точек: ${wps.length}, нумерация с 0)`);
+    M.setWaypoint(w, { ...e, pos: e.pos && at(e.pos) });
+  }
   return objDetails(o);
 }));
 tool('map_script_get', 'Скрипт карты (язык скриптов ПЗ: GlobalVars, Declare/Script/WorldScript, триггеры).', { mob: MOB }, ['mob'], a => (M.getScript(M.readMob(readGameFile(mapRel(a.mob, 'mob')))) ?? '').replace(/\r\n/g, '\n'));
@@ -528,20 +604,63 @@ tool('terrain_paint', 'Рисовать текстурой земли пачко
   }
   return rect;
 }, { graph: false }));
-tool('terrain_render', 'Картинка ландшафта сверху (PNG): текстуры земли с тенями рельефа, вода, объекты карты точками (красные — существа, жёлтые — прочие), сетка секторов 32 м. Верх картинки — север (большие y), x растёт вправо. Используйте, чтобы увидеть результат правок.', { mpr: MPR, mob: S.str('Показать объекты этой карты (необязательно)'), x0: S.num(''), y0: S.num(''), x1: S.num(''), y1: S.num(''), size: S.int('Длинная сторона, px (по умолчанию 768, максимум 1536)') }, ['mpr'], a => {
-  const map = loadMap(mapRel(a.mpr, 'mpr')) || fail('Нет ландшафта'), atl = atlasImages(map);
-  const x0 = a.x0 ?? 0, y0 = a.y0 ?? 0, x1 = a.x1 ?? map.W - 1, y1 = a.y1 ?? map.H - 1;
-  const size = Math.min(1536, a.size ?? 768), sc = size / Math.max(x1 - x0, y1 - y0), w = Math.max(1, Math.round((x1 - x0) * sc)), h = Math.max(1, Math.round((y1 - y0) * sc));
+tool('terrain_autotile', 'Покраска земли с переходами, как на оригинальных картах. classes — классы земли и их «чистые» тайлы: {"grass": [0, 9, 10], "ground": [8], "stone": [1, 2, 3, 4]}. ops — формы {x, y, radius} или {x0, y0, x1, y1} с class: каждой вершине сетки (шаг 2 м) внутри формы назначается класс. Затем в затронутой области каждому тайлу подбирается тайл атласа с поворотом, у которого цвета углов совпадают с классами вершин (переходные тайлы трава→земля и т. п.); внутри однородных участков кладутся случайные тайлы класса. Остальные вершины получают класс по текущим тайлам.', { mpr: MPR, classes: S.obj('{класс: [тайлы]}'), ops: S.arr('Операции {форма, class}', { type: 'object' }) }, ['mpr', 'classes', 'ops'], a => {
+  let stats;
+  return editMpr(a, map => {
+    let rect = null;
+    for (const op of a.ops) { const s = shapeOf({ radius: 2, ...op }, map); rect = unionRect(rect, [Math.floor(s.x0) - 2, Math.floor(s.y0) - 2, Math.ceil(s.x1) + 2, Math.ceil(s.y1) + 2]); }
+    if (!rect) return null;
+    stats = autotile(map, a.classes, a.ops, rect);
+    return rect;
+  }, { graph: false }).then(r => ({ ...r, ...stats }));
+});
+const LIQUIDS = { water: { type: 3, color: [0.19, 0.32, 0.65, 0.6], selfIllum: 0, wave: 0.5, warp: 0, reserved: [0, 0, 0] }, lava: { type: 3, color: [0.8, 0, 0, 1], selfIllum: 1, wave: 0.5, warp: 0, reserved: [0, 0, 0] } };
+function liquidMaterial(map, m) {
+  if (Number.isInteger(m)) return m < map.materials.length ? m : fail(`material: 0…${map.materials.length - 1}`);
+  const p = LIQUIDS[m] || fail('material: "water", "lava" или номер материала');
+  const i = map.materials.findIndex(x => x.type === p.type && x.selfIllum === p.selfIllum && Math.abs(x.color[0] - p.color[0]) < 0.1 && Math.abs(x.color[2] - p.color[2]) < 0.1);
+  return i >= 0 ? i : map.materials.push(structuredClone(p)) - 1;
+}
+tool('terrain_water', 'Вода или лава (жидкость с поверхностью) пачкой операций. Форма: {x, y, radius} или {x0, y0, x1, y1}. level — высота поверхности, м; заливаются тайлы, где земля ниже level. material: "water", "lava" (материал добавится, если его нет) или номер; тайл поверхности — tile/tiles/type, как в terrain_paint (rot "random" по умолчанию). remove: true — убрать жидкость. Граф проходимости обновляется сам.', { mpr: MPR, ops: S.arr('Операции', { type: 'object' }) }, ['mpr', 'ops'], a => editMpr(a, map => {
+  let rect = null;
+  const UP = packNormal(0, 0, 1);
+  for (const op of a.ops) {
+    const s = shapeOf({ radius: 4, ...op }, map), mat = op.remove ? 0xffff : liquidMaterial(map, op.material ?? 'water'), pick = op.remove ? null : tilePicker(map, { rot: 'random', ...op });
+    const lv = op.remove ? 0 : toRaw(map, op.level ?? fail('Нужен level — высота поверхности, м'));
+    for (let ty = Math.max(0, Math.floor(s.y0 / 2)); ty <= Math.min(map.TH - 1, Math.floor(s.y1 / 2)); ty++)
+      for (let tx = Math.max(0, Math.floor(s.x0 / 2)); tx <= Math.min(map.TW - 1, Math.floor(s.x1 / 2)); tx++) {
+        if (!(s.w(tx * 2 + 1, ty * 2 + 1) > 0)) continue;
+        const corners = [0, 1, 2].flatMap(j => [0, 1, 2].map(i => (ty * 2 + j) * map.W + tx * 2 + i));
+        if (!op.remove && corners.every(k => map.z[k] >= lv)) continue; // dry tile
+        map.waterMat[ty * map.TW + tx] = mat;
+        if (op.remove) continue;
+        map.waterTiles[ty * map.TW + tx] = pick(tx, ty);
+        for (const k of corners) { map.wz[k] = lv; map.wdx[k] = map.wdy[k] = 0; map.wnormal[k] = UP; }
+      }
+    const r = [Math.floor(s.x0) - 2, Math.floor(s.y0) - 2, Math.ceil(s.x1) + 2, Math.ceil(s.y1) + 2];
+    markDirty(map, ...r); rect = unionRect(rect, r);
+  }
+  return rect;
+}));
+// Top view of a landscape (north up): ground textures with relief shading and liquids, optional 32 m grid.
+function topView(map, { x0 = 0, y0 = 0, x1 = map.W - 1, y1 = map.H - 1, size = 768, grid = true } = {}) {
+  const atl = atlasImages(map), sc = Math.min(1536, size) / Math.max(x1 - x0, y1 - y0), w = Math.max(1, Math.round((x1 - x0) * sc)), h = Math.max(1, Math.round((y1 - y0) * sc));
   const px = new Uint8ClampedArray(w * h * 4), L = [-0.43, -0.26, 0.86];
   for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
     const x = x0 + (c + 0.5) / sc, y = y1 - (r + 0.5) / sc, xi = Math.min(map.W - 1, Math.round(x)), yi = Math.min(map.H - 1, Math.round(y)), n = map.normal[yi * map.W + xi];
     const nx = (((n >>> 11) & 0x7ff) - 1000) / 1000, ny = ((n & 0x7ff) - 1000) / 1000, nz = (n >>> 22) / 1000, shade = 0.45 + 0.75 * Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
     let col = groundColor(map, atl, x, y).map(v => v * shade);
     const tx = Math.min(map.TW - 1, Math.floor(x / 2)), ty = Math.min(map.TH - 1, Math.floor(y / 2));
-    if (map.waterMat[ty * map.TW + tx] !== 0xffff && map.wz[yi * map.W + xi] > map.z[yi * map.W + xi]) col = col.map((v, i) => v * 0.45 + [40, 90, 130][i] * 0.55);
-    if (Math.abs(x % 32) < 0.5 / sc || Math.abs(y % 32) < 0.5 / sc) col = col.map(v => v * 0.7 + 255 * 0.3);
+    const wm = map.materials[map.waterMat[ty * map.TW + tx]];
+    if (wm && map.wz[yi * map.W + xi] > map.z[yi * map.W + xi]) col = col.map((v, i) => v * 0.45 + (wm.color[i] * 160 + 40) * 0.55);
+    if (grid && (Math.abs(x % 32) < 0.5 / sc || Math.abs(y % 32) < 0.5 / sc)) col = col.map(v => v * 0.7 + 255 * 0.3);
     px.set([...col, 255], (r * w + c) * 4);
   }
+  return { x0, y0, x1, y1, sc, w, h, px };
+}
+tool('terrain_render', 'Картинка ландшафта сверху (PNG): текстуры земли с тенями рельефа, вода, объекты карты точками (красные — существа, жёлтые — прочие), сетка секторов 32 м. Верх картинки — север (большие y), x растёт вправо. Используйте, чтобы увидеть результат правок.', { mpr: MPR, mob: S.str('Показать объекты этой карты (необязательно)'), x0: S.num(''), y0: S.num(''), x1: S.num(''), y1: S.num(''), size: S.int('Длинная сторона, px (по умолчанию 768, максимум 1536)'), grid: S.bool('Сетка секторов (по умолчанию да)') }, ['mpr'], a => {
+  const map = loadMap(mapRel(a.mpr, 'mpr')) || fail('Нет ландшафта');
+  const { x0, y0, x1, y1, sc, w, h, px } = topView(map, { x0: a.x0 ?? 0, y0: a.y0 ?? 0, x1: a.x1 ?? map.W - 1, y1: a.y1 ?? map.H - 1, size: a.size ?? 768, grid: a.grid !== false });
   let objects = 0;
   if (a.mob) for (const o of M.listObjects(M.readMob(readGameFile(mapRel(a.mob, 'mob'))))) {
     const p = M.getField(o.node, M.OBJ.pos), c = Math.round((p[0] - x0) * sc), r = Math.round((y1 - p[1]) * sc), col = o.kind === UNIT ? [230, 40, 40] : [255, 210, 60];
@@ -563,6 +682,168 @@ tool('zone_set', 'Заменить блок зоны в map.txt (текст в �
   return { saved: 'Res/texts.res: map.txt' };
 });
 tool('zone_create', 'Новая зона (как мастер в редакторе): ландшафт .mpr (ровный нужного размера или копия образца), .mob с графом проходимости, текстуры земли и миникарта из зоны-образца, запись в map.txt, по желанию переход из соседней зоны. Потом лепите рельеф terrain_* и расставляйте объекты map_object_add.', { id: S.str('id зоны, латиница, например gz22g'), file: S.str('Имя файлов карты, латиница'), title: S.str('Комментарий'), allod: { type: 'string', enum: Object.keys(ISLAND) }, tpl: S.str('id зоны-образца (zones_list, type=game)'), relief: { type: 'string', enum: ['flat', 'copy'] }, sx: S.int('Ширина в секторах по 32 м (2…16)'), sy: S.int('Высота в секторах'), link: S.str('id зоны для перехода (необязательно)'), open: S.bool('Открыть переход в скрипте соседней зоны (по умолчанию true)') }, ['id', 'file', 'allod', 'tpl'], async a => createZone(io, await loadWorld(io), a));
+
+// ---- globe ----
+// Island globe = <lnk> (parts "down" + one patch per game zone, files <lnk><part>.fig/.bon in figures.res);
+// map.txt #figure <lnk><part> names a zone's patch. Patches are meshes on the island surface, textured by a
+// planar projection of <tex> (zone borders are painted into that texture, <tex>g has none).
+const GLOBES = { gipat: { lnk: 'ingm1', tex: 'gipatmap' }, suslanger: { lnk: 'ingm4', tex: 'suslangermap' } };
+const originalRes = rel => { const b = path.join(BACKUP, rel); return fs.existsSync(b) ? loadRes(b) : loadRes(gamePath(rel)); };
+function globeOf(allod) {
+  const g = GLOBES[allod] || fail(allod === 'ingos' ? 'Глобус Ингоса хранится в ingm3.mod — пока не поддерживается' : 'allod: ' + Object.keys(GLOBES).join(', '));
+  const figs = loadRes(gamePath('Res/figures.res')), get = n => figs.find(e => e.name.toLowerCase() === n.toLowerCase());
+  const lnk = readLnk(get(g.lnk + '.lnk').data), origLnk = readLnk(originalRes('Res/figures.res').find(e => e.name.toLowerCase() === g.lnk + '.lnk').data);
+  const fig = part => { const e = get(g.lnk + part + '.fig'); return e ? readFig(e.data) : null; };
+  const pts = f => { const out = []; for (let c = 0; c < f.comps.length / 3; c++) { const p = f.comps[c * 3 + 1], t = f.comps[c * 3 + 2]; out.push({ x: f.variants[0][p * 3], y: f.variants[0][p * 3 + 1], u: f.uv[t * 2], v: f.uv[t * 2 + 1] }); } return out; };
+  const down = fig('down'), tris = [];
+  for (let t = 0; t < down.indices.length; t += 3) tris.push([0, 1, 2].map(k => { const p = down.comps[down.indices[t + k] * 3 + 1]; return [down.variants[0][p * 3], down.variants[0][p * 3 + 1], down.variants[0][p * 3 + 2]]; }));
+  // island top under (x, y); null over the sea and in the holes under original zone patches
+  const surface = (x, y) => {
+    let best = null;
+    for (const [a, b, c] of tris) {
+      const d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]); if (Math.abs(d) < 1e-12) continue;
+      const l1 = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / d, l2 = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / d, l3 = 1 - l1 - l2;
+      if (l1 < -1e-6 || l2 < -1e-6 || l3 < -1e-6) continue;
+      const z = l1 * a[2] + l2 * b[2] + l3 * c[2]; if (best === null || z > best) best = z;
+    }
+    return best !== null && best > 0 ? best : null;
+  };
+  // texture projection, least-squares fit on an original zone patch: u = au*x + bu, v = av*y + bv
+  const refPart = origLnk.find(l => l.name !== 'down').name, ref = pts(fig(refPart));
+  const fit = (src, k) => { const xs = ref.map(p => p[src]), ys = ref.map(p => p[k]), n = xs.length, mx = xs.reduce((s, v) => s + v) / n, my = ys.reduce((s, v) => s + v) / n; let sxy = 0, sxx = 0; xs.forEach((x, i) => { sxy += (x - mx) * (ys[i] - my); sxx += (x - mx) ** 2; }); const a = sxy / sxx; return [a, my - a * mx]; };
+  const [au, bu] = fit('x', 'u'), [av, bv] = fit('y', 'v');
+  const bbox = f => { const p = pts(f); return [Math.min(...p.map(q => q.x)), Math.min(...p.map(q => q.y)), Math.max(...p.map(q => q.x)), Math.max(...p.map(q => q.y))].map(r2); };
+  return { ...g, links: lnk, origLinks: origLnk, refPart, fig, surface, uv: (x, y) => [au * x + bu, av * y + bv], proj: { au, bu, av, bv }, bbox, down };
+}
+// Outer edges of a patch, in texture pixels.
+function patchOutline(f, size) {
+  const cnt = new Map(), key = (a, b) => a < b ? a + ',' + b : b + ',' + a, pos = c => f.comps[c * 3 + 1];
+  for (let t = 0; t < f.indices.length; t += 3) for (let k = 0; k < 3; k++) { const kk = key(pos(f.indices[t + k]), pos(f.indices[t + (k + 1) % 3])); cnt.set(kk, (cnt.get(kk) || 0) + 1); }
+  const uvOf = new Map(); for (let c = 0; c < f.comps.length / 3; c++) uvOf.set(f.comps[c * 3 + 1], [f.uv[f.comps[c * 3 + 2] * 2] * size - 0.5, f.uv[f.comps[c * 3 + 2] * 2 + 1] * size - 0.5]);
+  return [...cnt].filter(([, c]) => c === 1).map(([k]) => k.split(',').map(Number).map(p => uvOf.get(p)));
+}
+// Yellow zone border like the original ones: 2 px core, dark rim.
+function paintBorder(img, segs) {
+  const dseg = (px, py, [a, b]) => { const dx = b[0] - a[0], dy = b[1] - a[1], t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / (dx * dx + dy * dy || 1))); return Math.hypot(px - a[0] - t * dx, py - a[1] - t * dy); };
+  const xs = segs.flat().map(p => p[0]), ys = segs.flat().map(p => p[1]);
+  for (let py = Math.max(0, Math.floor(Math.min(...ys)) - 4); py <= Math.min(img.height - 1, Math.ceil(Math.max(...ys)) + 4); py++)
+    for (let px = Math.max(0, Math.floor(Math.min(...xs)) - 4); px <= Math.min(img.width - 1, Math.ceil(Math.max(...xs)) + 4); px++) {
+      const d = Math.min(...segs.map(s => dseg(px, py, s))), o = (py * img.width + px) * 4;
+      const [col, al] = d < 1.0 ? [[243, 222, 70], 1] : d < 1.8 ? [[197, 173, 33], 0.8] : d < 2.6 ? [[115, 99, 8], 0.45] : [null, 0];
+      if (col) for (let q = 0; q < 3; q++) img.rgba[o + q] = img.rgba[o + q] * (1 - al) + col[q] * al;
+    }
+}
+// Set (or add after the #zone line) a one-line directive of a map.txt block.
+function setDirective(text, d, val) {
+  const re = new RegExp(`(^#${d}[ \\t]*\\r?\\n)[^\\r\\n]*`, 'm');
+  return re.test(text) ? text.replace(re, `$1${val}`) : text.replace(/\r?\n/, m => `${m}#${d}\r\n${val}\r\n`);
+}
+tool('globe_info', 'Глобус острова: части-участки зон (какие зоны на них ссылаются, габариты в координатах глобуса), габариты острова, текстура глобуса и формула перевода координат глобуса в текстуру (пиксель = u·ширина, v·высота; север — большие y). Посмотрите текстуру texture_export, чтобы выбрать свободную сушу для globe_zone.', { allod: S.str('gipat или suslanger') }, ['allod'], async a => {
+  const g = globeOf(a.allod), w = await loadWorld(io), zonesOf = fig => w.blocks.filter(b => (directive(b.text, 'figure') || '').trim().toLowerCase() === fig).map(b => b.id);
+  const k = v => Math.round(v * 10000) / 10000;
+  return { model: g.lnk + '.lnk', texture: g.tex + '.mmp', island_bbox: g.bbox(g.down), uv: `u = ${k(g.proj.au)}·x + ${k(g.proj.bu)}, v = ${k(g.proj.av)}·y + ${k(g.proj.bv)}`,
+    parts: g.links.filter(l => l.name !== 'down').map(l => ({ part: l.name, figure: g.lnk + l.name, zones: zonesOf(g.lnk + l.name), original: g.origLinks.some(o => o.name === l.name), bbox: g.fig(l.name) ? g.bbox(g.fig(l.name)) : null })) };
+});
+tool('globe_zone', 'Показать игровую зону на глобусе, как оригинальные: участок поверхности острова (скруглённый прямоугольник w×h с центром x, y в координатах глобуса — см. globe_info), жёлтая граница на текстуре глобуса, #figure зоны в map.txt и #position её переходов (точка на границе участка в сторону соседней зоны). Повторный вызов переносит участок; границы рисуются заново поверх оригинальной текстуры из бэкапа.', { zone: S.str('id игровой зоны'), x: S.num('Центр, координаты глобуса'), y: S.num(''), w: S.num('Ширина (участки Гипата 0,5…1,7)'), h: S.num('Высота') }, ['zone', 'x', 'y', 'w', 'h'], async a => {
+  const world = await loadWorld(io), b = world.blocks.find(x => x.id === a.zone) || fail('Нет зоны ' + a.zone);
+  if (b.type !== 'game') fail('Участок на глобусе бывает только у зон type=game');
+  const g = globeOf(b.allod), cur = (directive(b.text, 'figure') || '').trim().toLowerCase();
+  const sharedFig = world.blocks.some(x => x.id !== b.id && (directive(x.text, 'figure') || '').trim().toLowerCase() === cur);
+  let part = cur.startsWith(g.lnk) && !sharedFig && !g.origLinks.some(l => g.lnk + l.name === cur) ? cur.slice(g.lnk.length) : null;
+  if (!part) { const used = new Set(g.links.map(l => +l.name).filter(Number.isFinite)); let n = 21; while (used.has(n)) n++; part = String(n); }
+  // grid draped on the island; outer vertices snapped onto the exact outline so the border is smooth
+  const RX = a.w / 2, RY = a.h / 2, f4 = (x, y) => (Math.abs(x - a.x) / RX) ** 4 + (Math.abs(y - a.y) / RY) ** 4, STEP = Math.min(RX, RY) / 8, N = Math.ceil(Math.max(RX, RY) / STEP) + 1;
+  const id = new Map(), pos = [], uv = [], idx = [];
+  for (let j = -N; j <= N; j++) for (let i = -N; i <= N; i++) {
+    const x = a.x + i * STEP, y = a.y + j * STEP; if (f4(x, y) >= 1) continue;
+    const z = g.surface(x, y); if (z === null) continue;
+    id.set(i + ',' + j, pos.length / 3); pos.push(x, y, z + 0.01); uv.push(...g.uv(x, y));
+  }
+  if (pos.length < 30) fail('Здесь почти нет свободной суши острова — выберите место по globe_info и texture_export');
+  for (let j = -N; j < N; j++) for (let i = -N; i < N; i++) {
+    const [p, q, r, s] = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]].map(([u, v]) => id.get(u + ',' + v));
+    if (p !== undefined && q !== undefined && r !== undefined) idx.push(p, q, r);
+    if (p !== undefined && r !== undefined && s !== undefined) idx.push(p, r, s);
+  }
+  const eu = new Map(), ek = (p, q) => p < q ? p + ',' + q : q + ',' + p;
+  for (let t = 0; t < idx.length; t += 3) for (let k = 0; k < 3; k++) { const kk = ek(idx[t + k], idx[t + (k + 1) % 3]); eu.set(kk, (eu.get(kk) || 0) + 1); }
+  let offIsland = 0;
+  for (const v of new Set([...eu].filter(([, c]) => c === 1).flatMap(([k]) => k.split(',').map(Number)))) {
+    const s = f4(pos[v * 3], pos[v * 3 + 1]) ** -0.25, x = a.x + (pos[v * 3] - a.x) * s, y = a.y + (pos[v * 3 + 1] - a.y) * s, z = g.surface(x, y);
+    if (z === null) { offIsland++; continue; }
+    pos.splice(v * 3, 3, x, y, z + 0.01); uv.splice(v * 2, 2, ...g.uv(x, y));
+  }
+  const n = pos.length / 3, P4 = Math.ceil(n / 4) * 4, nrm = new Float32Array(P4 * 3);
+  for (let t = 0; t < idx.length; t += 3) {
+    const [p, q, r] = [idx[t], idx[t + 1], idx[t + 2]].map(k => pos.slice(k * 3, k * 3 + 3)), e1 = [q[0] - p[0], q[1] - p[1], q[2] - p[2]], e2 = [r[0] - p[0], r[1] - p[1], r[2] - p[2]];
+    const c = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    for (const k of [idx[t], idx[t + 1], idx[t + 2]]) for (let m = 0; m < 3; m++) nrm[k * 3 + m] += c[m];
+  }
+  for (let k = 0; k < n; k++) { const l = Math.hypot(nrm[k * 3], nrm[k * 3 + 1], nrm[k * 3 + 2]) || 1; for (let m = 0; m < 3; m++) nrm[k * 3 + m] /= l; }
+  const variants = Array.from({ length: 8 }, () => { const v = new Float32Array(P4 * 3); v.set(pos); return v; }), comps = new Uint16Array(n * 3);
+  for (let k = 0; k < n; k++) comps.set([k, k, k], k * 3);
+  const ref = g.fig(g.refPart), figData = writeFig({ variants, normals: nrm, uv: Float32Array.from(uv), indices: Uint16Array.from(idx), comps, group: ref.group, texture: ref.texture });
+  const lnk = g.links.some(l => l.name === part) ? g.links : [...g.links, { name: part, parent: 'down' }];
+  const bon = loadRes(gamePath('Res/figures.res')).find(e => e.name.toLowerCase() === g.lnk + g.refPart + '.bon');
+  resUpdate('Res/figures.res', [{ name: g.lnk + part + '.fig', data: figData }, ...(bon ? [{ name: g.lnk + part + '.bon', data: bon.data }] : []), { name: g.lnk + '.lnk', data: writeLnk(lnk) }]);
+  // borders: original texture + every added patch (so moving a patch leaves no old border)
+  const img = decodeMmp(originalRes('Res/textures.res').find(e => e.name.toLowerCase() === g.tex + '.mmp').data);
+  for (const l of lnk) if (l.name !== 'down' && !g.origLinks.some(o => o.name === l.name)) { const pf = l.name === part ? readFig(figData) : g.fig(l.name); if (pf) paintBorder(img, patchOutline(pf, img.width)); }
+  resUpdate('Res/textures.res', [{ name: g.tex + '.mmp', data: encodeMmpArgb8(img.width, img.height, img.rgba) }]);
+  // map.txt: #figure of the zone; #position of its edge zones on the patch border facing the neighbour
+  b.text = setDirective(b.text, 'figure', g.lnk + part);
+  const edges = [];
+  for (const ex of exitsOf(b.text)) {
+    const e = world.blocks.find(x => x.id === ex.to && x.type === 'edge'); if (!e) continue;
+    const other = exitsOf(e.text).map(x => world.blocks.find(y => y.id === x.to)).find(y => y && y.id !== b.id);
+    const oFig = other && (directive(other.text, 'figure') || '').trim().toLowerCase(), of = oFig?.startsWith(g.lnk) ? g.fig(oFig.slice(g.lnk.length)) : null;
+    let dir = [-1, 0]; if (of) { const bb = g.bbox(of); dir = [(bb[0] + bb[2]) / 2 - a.x, (bb[1] + bb[3]) / 2 - a.y]; }
+    const ang = Math.atan2(dir[1], dir[0]), cx = Math.cos(ang), cy = Math.sin(ang), s = ((Math.abs(cx) / RX) ** 4 + (Math.abs(cy) / RY) ** 4) ** -0.25;
+    const px = a.x + cx * s, py = a.y + cy * s, val = `${r2(px)} ${r2(py)} ${r2(g.surface(px, py) ?? 0.3)}`;
+    e.text = setDirective(e.text, 'position', val); edges.push({ edge: e.id, position: val });
+  }
+  await saveWorld(io, world);
+  return { zone: b.id, figure: g.lnk + part, vertices: n, triangles: idx.length / 3, outline_points_off_island: offIsland, edges, saved: ['Res/figures.res', 'Res/textures.res: ' + g.tex + '.mmp', 'Res/texts.res: map.txt'] };
+});
+tool('zone_maps', 'Перерисовать миникарту и карту целей зоны по её текущему ландшафту (мастер новой зоны копирует их из зоны-образца, и они показывают чужую местность). Миникарта — вид сверху; карта целей — пергамент той же формы, что сейчас (или из parchment), с тенями рельефа, штриховкой склонов, водой и лавой.', { zone: S.str('id зоны'), parchment: S.str('Текстура-основа пергамента (по умолчанию текущая карта целей зоны)') }, ['zone'], async a => {
+  const b = (await loadWorld(io)).blocks.find(x => x.id === a.zone) || fail('Нет зоны ' + a.zone);
+  // #maps: line 1 = size in sectors, line 2 = minimap and objectives textures
+  const mpr = (directive(b.text, 'res') || '').trim().split(/\s+/)[0], [miniName, questName] = (b.text.match(/^#maps[ \t]*\r?\n[^\r\n]*\r?\n([^#\r\n][^\r\n]*)/m)?.[1] || '').trim().split(/\s+/);
+  if (!mpr || !questName) fail('В блоке зоны нет #res или #maps с именами текстур');
+  const map = loadMap(mapRel(mpr, 'mpr')) || fail('Нет ландшафта ' + mpr), mi = mmpInfo(resEntry('Res/textures.res', miniName + '.mmp'));
+  // longest side of the map across the texture width (zone10: 256x192 m -> 256x192 px of a 256x256 minimap)
+  const top = topView(map, { size: mi.width, grid: false }), mini = new Uint8Array(mi.width * mi.height * 4);
+  for (let i = 3; i < mini.length; i += 4) mini[i] = 255;
+  for (let y = 0; y < Math.min(top.h, mi.height); y++) for (let x = 0; x < Math.min(top.w, mi.width); x++) mini.set(top.px.subarray((y * top.w + x) * 4, (y * top.w + x) * 4 + 4), (y * mi.width + x) * 4);
+  const old = decodeMmp(resEntry('Res/textures.res', (a.parchment || questName) + '.mmp')), QW = old.width, QH = old.height;
+  let base = Float32Array.from(old.rgba); // blur the old drawing away, keep parchment tone and torn edges
+  for (let pass = 0; pass < 3; pass++) for (const horiz of [true, false]) {
+    const nb = new Float32Array(base.length);
+    for (let y = 0; y < QH; y++) for (let x = 0; x < QW; x++) {
+      let s0 = 0, s1 = 0, s2 = 0, n = 0;
+      for (let k = -6; k <= 6; k++) { const xx = horiz ? x + k : x, yy = horiz ? y : y + k; if (xx < 0 || yy < 0 || xx >= QW || yy >= QH || !old.rgba[(yy * QW + xx) * 4 + 3]) continue; const o = (yy * QW + xx) * 4; s0 += base[o]; s1 += base[o + 1]; s2 += base[o + 2]; n++; }
+      const o = (y * QW + x) * 4; nb.set(n ? [s0 / n, s1 / n, s2 / n, old.rgba[o + 3]] : [base[o], base[o + 1], base[o + 2], old.rgba[o + 3]], o);
+    }
+    base = nb;
+  }
+  const hz = (x, y) => heightAt(map, Math.max(0, Math.min(map.H - 1, Math.round(y))) * map.W + Math.max(0, Math.min(map.W - 1, Math.round(x))));
+  const quest = new Uint8Array(QW * QH * 4), mpp = Math.max(map.W - 1, map.H - 1) / QW;
+  for (let y = 0; y < QH; y++) for (let x = 0; x < QW; x++) {
+    const o = (y * QW + x) * 4, al = old.rgba[o + 3]; if (!al) continue;
+    let col = [base[o], base[o + 1], base[o + 2]];
+    const wx = (x + 0.5) * mpp, wy = map.H - 1 - (y + 0.5) * mpp;
+    if (wy >= 0 && wx <= map.W - 1) {
+      const gx = (hz(wx + 1, wy) - hz(wx - 1, wy)) / 2, gy = (hz(wx, wy + 1) - hz(wx, wy - 1)) / 2, sl = Math.hypot(gx, gy);
+      col = col.map(v => v * Math.max(0.72, Math.min(1.12, 1 - 0.21 * (gx - gy))));
+      if (sl > 0.2) { const k = Math.min(0.6, (sl - 0.2) * 1.6); col = col.map((v, i) => v * (1 - k) + [92, 58, 20][i] * k); } // slope hatching
+      const t = Math.min(map.TH - 1, Math.floor(wy / 2)) * map.TW + Math.min(map.TW - 1, Math.floor(wx / 2)), kk = Math.round(wy) * map.W + Math.round(wx), m = map.materials[map.waterMat[t]];
+      if (m && map.wz[kk] > map.z[kk]) col = m.selfIllum > 0 ? col.map((v, i) => v * 0.3 + [200, 70, 30][i] * 0.7) : col.map((v, i) => v * 0.4 + [70, 98, 132][i] * 0.6);
+    }
+    quest.set([...col.map(v => Math.max(0, Math.min(255, Math.round(v)))), al], o);
+  }
+  resUpdate('Res/textures.res', [{ name: miniName + '.mmp', data: encodeMmpArgb8(mi.width, mi.height, mini) }, { name: questName + '.mmp', data: encodeMmpArgb8(QW, QH, quest) }]);
+  return { minimap: miniName + '.mmp', objectives: questName + '.mmp', map_px: [top.w, top.h] };
+});
 
 // ---- models ----
 tool('models_list', 'Модели в figures.res (имя без .mod).', { query: S.str(''), limit: S.int('По умолчанию 200') }, [], a => {
@@ -602,14 +883,26 @@ tool('texture_import', 'Заменить или создать текстуру 
   resUpdate(res, [{ name: n, data: encodeMmpArgb8(w, h, resizeRgba(img.rgba, img.width, img.height, w, h)) }]);
   return { texture: n, size: [w, h], created: !old };
 });
-tool('terrain_tile_import', 'Своя текстура земли: PNG кладётся в тайл атласа ландшафта (64×64, видимая часть — центральные 48×48, края — запас для стыков). Затем рисуйте этим тайлом через terrain_paint. Тип земли тайла (звук шагов, проходимость) задаётся type. Атлас общий для всех карт с тем же именем ландшафта.', { mpr: MPR, tile: S.int('Код тайла atlas*64+index, который заменить'), png_path: S.str('PNG, лучше бесшовный; масштабируется до 48×48'), type: S.str('Тип земли: grass, ground, stone, sand, rock, road, swamp… (необязательно)') }, ['mpr', 'tile', 'png_path'], async a => {
+tool('terrain_tile_import', 'Своя текстура земли: PNG кладётся в тайл атласа ландшафта (64×64, видимая часть — центральные 48×48, края — запас для стыков). Затем рисуйте этим тайлом через terrain_paint. Тип земли тайла (звук шагов, проходимость) задаётся type. Вместо PNG можно скопировать тайл из атласа другого ландшафта: from_mpr + from_tile (тип берётся оттуда). Атлас общий для всех карт с тем же именем ландшафта.', { mpr: MPR, tile: S.int('Код тайла atlas*64+index, который заменить'), png_path: S.str('PNG, лучше бесшовный; масштабируется до 48×48'), from_mpr: S.str('Или взять тайл из атласа другого ландшафта (например вода из zone5_1)…'), from_tile: S.int('…его код atlas*64+index'), type: S.str('Тип земли: grass, ground, stone, sand, rock, road, swamp… (необязательно)') }, ['mpr', 'tile'], async a => {
   let atlasName;
   const out = await editMpr(a, map => {
   if (!(a.tile >= 0 && a.tile < map.textures * 64)) fail(`tile 0…${map.textures * 64 - 1}`);
   atlasName = `${map.name}${String(a.tile >> 6).padStart(3, '0')}.mmp`;
   const atlas = decodeMmp(resEntry('Res/textures.res', atlasName));
   if (atlas.width !== 512 || atlas.height !== 512) fail('Атлас не 512×512');
-  const src = decodePng(fs.readFileSync(a.png_path)), cell = resizeRgba(src.rgba, src.width, src.height, 48, 48), local = a.tile & 63;
+  let cell;
+  if (a.from_mpr !== undefined) { // the 48x48 visible picture of a tile of another landscape, same atlas layout
+    const fm = loadMap(mapRel(a.from_mpr, 'mpr')) || fail('Нет ландшафта ' + a.from_mpr);
+    if (!(a.from_tile >= 0 && a.from_tile < fm.textures * 64)) fail(`from_tile 0…${fm.textures * 64 - 1}`);
+    const sa = decodeMmp(resEntry('Res/textures.res', `${fm.name}${String(a.from_tile >> 6).padStart(3, '0')}.mmp`)), sl = a.from_tile & 63, sx0 = (sl & 7) * 64 + 8, sy0 = (7 - (sl >> 3)) * 64 + 8;
+    cell = new Uint8Array(48 * 48 * 4);
+    for (let y = 0; y < 48; y++) cell.set(sa.rgba.subarray(((sy0 + y) * sa.width + sx0) * 4, ((sy0 + y) * sa.width + sx0 + 48) * 4), y * 48 * 4);
+    if (a.type === undefined) a.type = TYPE_EN[fm.tileTypes[a.from_tile]];
+  } else {
+    if (!a.png_path) fail('Укажите png_path или from_mpr + from_tile');
+    const src = decodePng(fs.readFileSync(a.png_path)); cell = resizeRgba(src.rgba, src.width, src.height, 48, 48);
+  }
+  const local = a.tile & 63;
   // 64x64 cell: 48x48 picture in the middle, 8 px border repeats the picture's opposite edge (seamless wrap)
   const ox = (local & 7) * 64, oy = (7 - (local >> 3)) * 64;
   for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) { const sx = (x - 8 + 48) % 48, sy = (y - 8 + 48) % 48; atlas.rgba.set(cell.subarray((sy * 48 + sx) * 4, (sy * 48 + sx) * 4 + 4), ((oy + y) * 512 + ox + x) * 4); }

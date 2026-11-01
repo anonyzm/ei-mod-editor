@@ -157,6 +157,10 @@ export function getPatrols(unit) {
         points: p.children.filter(c => c.id === 0xbbbe0000).map(w => ({
           node: w, pos: codec.vec3.get(child(w, 0xbbbe0001).data),
           wait: codec.u32.get(child(w, 0xbbbe0002)?.data || new Uint8Array(4)),
+          // meaning unknown; originals: 0 almost always, 5/30 on a few archers and elementals
+          param: child(w, 0xbbbe0003) ? codec.f32.get(child(w, 0xbbbe0003).data) : 0,
+          // 1 only on some single-point routes (pigs, dogs, idle NPCs)
+          flag: child(w, 0xbbbe0004)?.data[0] ?? 0,
         })),
       });
     }
@@ -164,11 +168,19 @@ export function getPatrols(unit) {
   return out;
 }
 
-export function newWaypoint(pos, wait = 15) {
+export function newWaypoint(pos, wait = 15, param = 0, flag = 0) {
   return { id: 0xbbbe0000, children: [
     { id: 0xbbbe0001, data: codec.vec3.set(pos) }, { id: 0xbbbe0002, data: codec.u32.set(wait) },
-    { id: 0xbbbe0003, data: codec.u32.set(0) }, { id: 0xbbbe0004, data: Uint8Array.of(0) },
+    { id: 0xbbbe0003, data: codec.f32.set(param) }, { id: 0xbbbe0004, data: Uint8Array.of(flag ? 1 : 0) },
   ] };
+}
+// Change fields of a waypoint node in place ({pos, wait, param, flag}, any subset).
+export function setWaypoint(w, { pos, wait, param, flag }) {
+  const put = (id, data) => { const c = child(w, id); if (c) c.data = data; else w.children.push({ id, data }); };
+  if (pos) put(0xbbbe0001, codec.vec3.set(pos));
+  if (wait !== undefined) put(0xbbbe0002, codec.u32.set(Math.max(0, Math.round(wait))));
+  if (param !== undefined) put(0xbbbe0003, codec.f32.set(+param));
+  if (flag !== undefined) put(0xbbbe0004, Uint8Array.of(flag ? 1 : 0));
 }
 
 // Deep copy (for duplicating objects).
