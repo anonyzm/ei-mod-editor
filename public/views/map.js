@@ -117,7 +117,7 @@ export async function mount(root, [mobArg, mprArg]) {
     st.map = readMpr(mprU8);
     const atlases = await loadAtlases(st.map);
     terrain = buildTerrain(st.map, atlases);
-    water = buildWater(st.map);
+    water = buildWater(st.map, atlases);
     scene.add(terrain, water);
     controls.target.set(st.map.W / 2, st.map.H / 2, 0);
     camera.position.set(st.map.W / 2, st.map.H / 2 - 60, 80);
@@ -199,7 +199,7 @@ export async function mount(root, [mobArg, mprArg]) {
     renderList(); renderProps(); drawRoutes();
   }
   gizmo.addEventListener('objectChange', () => {
-    if (st.selPt) { const p = gizmo.object.position; st.selPt.set([p.x, p.y, p.z]); drawRoutes(true); markMob(); return; }
+    if (st.selPt) { const p = gizmo.object.position; st.selPt.set([p.x, p.y, p.z]); drawRoutes(true); markMob(); renderPropsSoon(); return; }
     if (st.sel) { if (gizmo.mode === 'rotate') { const e = new THREE.Euler().setFromQuaternion(st.sel.group.quaternion, 'ZYX'); st.sel.group.quaternion.setFromEuler(new THREE.Euler(0, 0, e.z, 'ZYX')); } syncToNode(st.sel); markMob(); renderPropsSoon(); }
   });
   let propsTimer;
@@ -232,6 +232,10 @@ export async function mount(root, [mobArg, mprArg]) {
     const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4;
     downAt = null;
     if (moved || st.mode !== 'select') return;
+    if (e.shiftKey && st.sel?.kind === 0xbbbb0000 && terrain) { // Shift+click: new waypoint here, after the selected one
+      const g = pick(e, [terrain]);
+      if (g) { putWaypoint(st.sel, g.point.x, g.point.y, st.selPt?.label?.startsWith('wp') ? st.selPt.index : undefined); return; }
+    }
     const hit = pick(e, [routeRoot, objRoot]);
     let o = hit?.object;
     while (o && !o.userData.obj && !o.userData.point) o = o.parent;
@@ -240,28 +244,70 @@ export async function mount(root, [mobArg, mprArg]) {
   }
 
   // ---------- patrol routes ----------
-  function drawRoutes(keepGizmo) {
+  // Selected creature's route: solid line through the waypoints in order, dashed return from the last
+  // point to the first and from the guard point, arrows for the walking direction, "number · wait" labels.
+  function routeLabel(text, color) {
+    const c = document.createElement('canvas'), g = c.getContext('2d'), font = 'bold 28px system-ui, sans-serif';
+    g.font = font; c.width = Math.ceil(g.measureText(text).width) + 16; c.height = 40;
+    g.font = font; g.fillStyle = 'rgba(0,0,0,0.72)'; g.beginPath(); g.roundRect(0, 0, c.width, c.height, 8); g.fill();
+    g.fillStyle = color; g.textBaseline = 'middle'; g.fillText(text, 8, 21);
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
+    s.scale.set(c.width / 40 * 0.9, 0.9, 1); s.renderOrder = 7; s.center.set(0.5, -0.6);
+    s.raycast = () => {}; // labels are not clickable
+    return s;
+  }
+  function clearRoutes() {
+    routeRoot.traverse(o => { o.geometry?.dispose(); o.material?.map?.dispose(); o.material?.dispose(); });
     routeRoot.clear();
+  }
+  function drawRoutes(keepGizmo) {
+    clearRoutes();
     if (!st.sel || st.sel.kind !== 0xbbbb0000) return;
+    const up = v => new THREE.Vector3(...v).add(new THREE.Vector3(0, 0, 0.3));
+    const line = (pts, color, dashed) => {
+      const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), dashed ? new THREE.LineDashedMaterial({ color, dashSize: 0.8, gapSize: 0.6, depthTest: false }) : new THREE.LineBasicMaterial({ color, depthTest: false }));
+      if (dashed) l.computeLineDistances();
+      l.renderOrder = 4; l.raycast = () => {}; routeRoot.add(l);
+    };
+    const arrow = (a, b, color) => {
+      const d = b.clone().sub(a); if (d.length() < 2) return;
+      const m = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.1, 10), new THREE.MeshBasicMaterial({ color, depthTest: false }));
+      m.position.copy(a).add(d.clone().multiplyScalar(0.5)); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize()); m.renderOrder = 5; m.raycast = () => {};
+      routeRoot.add(m);
+    };
     for (const patrol of M.getPatrols(st.sel.node)) {
-      const pts = [patrol.guard, ...patrol.points.map(p => p.pos)].filter(Boolean).map(p => new THREE.Vector3(...p).add(new THREE.Vector3(0, 0, 0.3)));
-      if (pts.length > 1) routeRoot.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([...pts, pts[1] ? pts[0] : pts[0]]), new THREE.LineBasicMaterial({ color: 0xffe060, depthTest: false })));
-      const mk = (pos, color, setter, label) => {
-        const m = new THREE.Mesh(new THREE.SphereGeometry(0.45, 12, 8), new THREE.MeshBasicMaterial({ color, depthTest: false }));
-        m.renderOrder = 5; m.position.fromArray(pos);
-        m.userData.point = { set: setter, label, patrol };
-        routeRoot.add(m);
-        if (keepGizmo && st.selPt?.label === label && st.selPt.patrol.node === patrol.node) gizmo.attach(m);
+      const pts = patrol.points.map(p => up(p.pos));
+      if (patrol.guard && pts.length) line([up(patrol.guard), pts[0]], 0xff8060, true);
+      if (pts.length > 1) {
+        line(pts, 0xffe060);
+        pts.slice(1).forEach((p, i) => arrow(pts[i], p, 0xffe060));
+        if (pts.length > 2) { line([pts.at(-1), pts[0]], 0xffe060, true); arrow(pts.at(-1), pts[0], 0xb0a040); }
+      }
+      const mk = (pos, color, setter, label, text, index) => {
+        const sel = st.selPt?.label === label && st.selPt.patrol.node === patrol.node;
+        const m = new THREE.Mesh(new THREE.SphereGeometry(sel ? 0.7 : 0.45, 14, 10), new THREE.MeshBasicMaterial({ color: sel ? 0xffffff : color, depthTest: false }));
+        m.renderOrder = 6; m.position.fromArray(pos);
+        m.userData.point = { set: setter, label, patrol, index };
+        const t = routeLabel(text, sel ? '#ffffff' : '#' + color.toString(16).padStart(6, '0')); t.position.copy(m.position);
+        routeRoot.add(m, t);
+        if (sel) st.selPt = m.userData.point; // fresh positions for the panel
+        if (keepGizmo && sel) gizmo.attach(m);
         return m;
       };
-      if (patrol.guard) mk(patrol.guard, 0xff6040, v => M.setField(patrol.node, [0xbbbd0001, 'vec3'], v), 'guard');
-      patrol.points.forEach((p, i) => mk(p.pos, 0xffe060, v => M.setField(p.node, [0xbbbe0001, 'vec3'], v), 'wp' + i));
+      if (patrol.guard) mk(patrol.guard, 0xff8060, v => M.setField(patrol.node, [0xbbbd0001, 'vec3'], v), 'guard', 'охрана');
+      patrol.points.forEach((p, i) => mk(p.pos, 0xffe060, v => M.setWaypoint(p.node, { pos: v }), 'wp' + i,
+        `${i + 1} · ${p.wait}${p.param ? ' · p' + fmt(p.param) : ''}${p.flag ? ' · ⚑' : ''}`, i));
     }
   }
   function selectPoint(m) {
     st.selPt = m.userData.point;
-    gizmo.attach(m); gizmo.setMode('translate');
+    gizmo.setMode('translate');
+    drawRoutes(true);
     renderProps();
+  }
+  function selectPointByLabel(label) {
+    let m = null; routeRoot.traverse(o => { if (o.userData.point?.label === label) m = o; });
+    if (m) selectPoint(m); else { st.selPt = null; renderProps(); }
   }
 
   // ---------- modes & brushes ----------
@@ -358,37 +404,80 @@ export async function mount(root, [mobArg, mprArg]) {
         h('button.danger', { onclick: removeSelected }, '✕ Удалить')),
     ));
   }
+  // ---------- route editing ----------
+  const WAIT_HINT = 'ожидание в точке (в оригиналах чаще 30…150, 3600 — стоять долго)';
+  function routeChanged(selectLabel) { markMob(); drawRoutes(); if (selectLabel) selectPointByLabel(selectLabel); else renderProps(); }
   function patrolPanel(o) {
-    const patrols = M.getPatrols(o.node);
-    return [h('h4', 'Маршрут патруля'),
-      patrols.length ? h('p.muted', `Точек: ${patrols.reduce((a, p) => a + p.points.length, 0)}. Кликните жёлтую точку на карте, чтобы двигать её.`) : h('p.muted', 'У существа нет маршрута.'),
+    const pt = M.getPatrols(o.node)[0];
+    if (!pt?.points.length) return [h('h4', 'Маршрут патруля'), h('p.muted', 'У существа нет маршрута. Shift+клик по земле или кнопка ниже добавят точку.'),
       h('div.row', h('button', { onclick: () => addWaypoint(o) }, '+ Точка маршрута'))];
+    return [h('h4', 'Маршрут патруля', h('small.sub', `${pt.points.length} точ.`)),
+      h('p.muted', 'Номер — порядок обхода, число — ожидание. Клик по номеру выбирает точку. Shift+клик по земле — новая точка после выбранной (или в конец).'),
+      ...pt.points.map((p, i) => {
+        const b = { padding: '3px 0', minWidth: 0 };
+        return h('div', { style: { display: 'grid', gridTemplateColumns: '36px minmax(0, 1fr) 28px 28px 28px', gap: '4px', alignItems: 'center', marginBottom: '4px' } },
+          h('button', { title: 'Выбрать и двигать на карте', style: b, onclick: () => selectPointByLabel('wp' + i) }, String(i + 1)),
+          h('input', { type: 'number', min: 0, value: p.wait, title: WAIT_HINT, style: { width: '100%', minWidth: 0 }, onchange: e => { M.setWaypoint(p.node, { wait: +e.target.value }); routeChanged(); } }),
+          h('button', { title: 'Раньше', style: b, disabled: i === 0, onclick: () => moveWaypoint(pt, i, -1) }, '↑'),
+          h('button', { title: 'Позже', style: b, disabled: i === pt.points.length - 1, onclick: () => moveWaypoint(pt, i, 1) }, '↓'),
+          h('button.danger', { title: 'Удалить точку', style: b, onclick: () => removeWaypoint(pt, i) }, '✕'));
+      }),
+      h('div.row', h('button', { onclick: () => addWaypoint(o) }, '+ Точка в конец'),
+        h('button.danger', { onclick: () => { if (confirm('Убрать все точки маршрута?')) { for (const p of pt.points) pt.node.children.splice(pt.node.children.indexOf(p.node), 1); routeChanged(); } } }, 'Убрать маршрут'))];
   }
   function pointPanel() {
-    const p = st.selPt;
-    return h('div.form', h('h4', p.label === 'guard' ? 'Точка охраны' : 'Точка маршрута'),
-      h('p.muted', 'Тащите стрелки, чтобы переместить точку.'),
-      p.label !== 'guard' ? h('button.danger', { onclick: () => {
-        const i = +p.label.slice(2), wp = p.patrol.points[i];
-        p.patrol.node.children.splice(p.patrol.node.children.indexOf(wp.node), 1);
-        st.selPt = null; gizmo.attach(st.sel.group); drawRoutes(); renderProps(); markMob();
-      } }, '✕ Удалить точку') : null,
-      h('button', { onclick: () => { st.selPt = null; gizmo.attach(st.sel.group); renderProps(); } }, '← К существу'));
+    const p = st.selPt, back = () => { st.selPt = null; gizmo.attach(st.sel.group); drawRoutes(); renderProps(); };
+    const pos = p.label === 'guard' ? p.patrol.guard : p.patrol.points[p.index].pos;
+    const xy = h('div.f', h('label', 'Позиция X, Y', h('small', ' — высота берётся с земли')), h('div.row', [0, 1].map(k => h('input', { type: 'number', step: 0.5, value: fmt(pos[k]), onchange: e => {
+      const v = pos.slice(); v[k] = +e.target.value; v[2] = groundZ(v[0], v[1]); p.set(v); routeChanged(p.label);
+    } }))));
+    if (p.label === 'guard') return h('div.form', h('h4', 'Точка охраны'), h('p.muted', 'Место, которое существо охраняет; к нему ведёт пунктир. Тащите стрелки на карте.'), xy, h('button', { onclick: back }, '← К существу'));
+    const pt = p.patrol, i = p.index, wp = pt.points[i];
+    return h('div.form', h('h4', `Точка маршрута ${i + 1} из ${pt.points.length}`),
+      h('p.muted', 'Тащите стрелки на карте, чтобы переместить точку.'), xy,
+      h('div.f', h('label', 'Ожидание', h('small', ' — ' + WAIT_HINT)), h('input', { type: 'number', min: 0, value: wp.wait, onchange: e => { M.setWaypoint(wp.node, { wait: +e.target.value }); routeChanged(p.label); } })),
+      h('div.f', h('label', 'Параметр bbbe0003', h('small', ' — смысл не изучен; в оригиналах 0, у лучников и элементалей 5 или 30')), h('input', { type: 'number', step: 0.5, value: fmt(wp.param), onchange: e => { M.setWaypoint(wp.node, { param: +e.target.value }); routeChanged(p.label); } })),
+      h('div.f', h('label', h('input', { type: 'checkbox', checked: !!wp.flag, onchange: e => { M.setWaypoint(wp.node, { flag: e.target.checked }); routeChanged(p.label); } }), ' Флаг bbbe0004', h('small', ' — в оригиналах только у одиночных точек (свиньи, собаки)'))),
+      h('div.row', h('button', { onclick: () => insertWaypoint(pt, i) }, '+ Точка после'),
+        h('button', { disabled: i === 0, onclick: () => moveWaypoint(pt, i, -1) }, '↑ Раньше'),
+        h('button', { disabled: i === pt.points.length - 1, onclick: () => moveWaypoint(pt, i, 1) }, '↓ Позже')),
+      h('div.row', h('button.danger', { onclick: () => removeWaypoint(pt, i) }, '✕ Удалить точку'), h('button', { onclick: back }, '← К существу')));
+  }
+  function ensurePatrol(o) {
+    let pt = M.getPatrols(o.node)[0];
+    if (pt) return pt;
+    const logic = o.node.children.find(c => c.id === 0xbbbc0000);
+    if (!logic) { toast('У существа нет блока поведения — скопируйте патрульного с другой карты', 'err'); return null; }
+    const pos = M.getField(o.node, M.OBJ.pos);
+    logic.children.push({ id: 0xbbbd0000, children: [{ id: 0xbbbd0001, data: M.codec.vec3.set([pos[0], pos[1], groundZ(pos[0], pos[1])]) }] });
+    M.setField(logic, [0xbbbc0003, 'u32'], 2); // behaviour: patrol path
+    return M.getPatrols(o.node)[0];
+  }
+  // New waypoint at (x, y) after point `after` (-1: at the start, undefined: at the end).
+  function putWaypoint(o, x, y, after) {
+    const pt = ensurePatrol(o); if (!pt) return;
+    const node = M.newWaypoint([x, y, groundZ(x, y)], pt.points[after ?? pt.points.length - 1]?.wait ?? 30);
+    const ref = pt.points[(after ?? pt.points.length - 1) + 1]?.node;
+    if (ref) pt.node.children.splice(pt.node.children.indexOf(ref), 0, node); else pt.node.children.push(node);
+    routeChanged('wp' + ((after ?? pt.points.length - 1) + 1));
   }
   function addWaypoint(o) {
-    let patrols = M.getPatrols(o.node);
-    const pos = M.getField(o.node, M.OBJ.pos);
-    if (!patrols.length) {
-      let logic = o.node.children.find(c => c.id === 0xbbbc0000);
-      if (!logic) { toast('У существа нет блока поведения — скопируйте патрульного с другой карты', 'err'); return; }
-      logic.children.push({ id: 0xbbbd0000, children: [{ id: 0xbbbd0001, data: M.codec.vec3.set(pos) }] });
-      M.setField(logic, [0xbbbc0003, 'u32'], 2); // behaviour: patrol path
-      patrols = M.getPatrols(o.node);
-    }
-    const pt = patrols[0], last = pt.points.at(-1)?.pos || pt.guard || pos;
-    const np = [last[0] + 4, last[1], groundZ(last[0] + 4, last[1])];
-    pt.node.children.push(M.newWaypoint(np));
-    drawRoutes(); renderProps(); markMob();
+    const pt = M.getPatrols(o.node)[0], last = pt?.points.at(-1)?.pos || pt?.guard || M.getField(o.node, M.OBJ.pos);
+    putWaypoint(o, last[0] + 4, last[1]);
+  }
+  function insertWaypoint(pt, i) {
+    const a = pt.points[i].pos, b = pt.points[i + 1]?.pos || pt.points[0].pos;
+    const [x, y] = pt.points.length > 1 ? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] : [a[0] + 4, a[1]];
+    putWaypoint(st.sel, x, y, i);
+  }
+  function moveWaypoint(pt, i, d) {
+    const a = pt.node.children.indexOf(pt.points[i].node), b = pt.node.children.indexOf(pt.points[i + d].node);
+    [pt.node.children[a], pt.node.children[b]] = [pt.node.children[b], pt.node.children[a]];
+    routeChanged(st.selPt ? 'wp' + (i + d) : null);
+  }
+  function removeWaypoint(pt, i) {
+    pt.node.children.splice(pt.node.children.indexOf(pt.points[i].node), 1);
+    st.selPt = null; gizmo.attach(st.sel.group); routeChanged();
   }
   function sculptPanel() {
     const b = st.brush;

@@ -18,6 +18,13 @@ export async function gameCatalog(readFile, mobFiles) {
   return { templates, objects: [...objects.values()].sort((a, b) => a.proto.localeCompare(b.proto)) };
 }
 
+// Map texture for a creature of a race: the race's texture list is stored with binary separators
+// (\x01\x12Dragon00\x00…); humans and orcs (unhu*, unor*) always use "default0" on the original maps,
+// their look comes from the armour.
+export function raceTexture(model, list) {
+  return /^un(hu|or)/i.test(model || '') ? 'default0' : String(list || '').split(/[;,\x00-\x1f]/).map(s => s.trim()).find(Boolean);
+}
+
 // Turn a cloned creature chunk into `unit` ({name, model?, texture?, complection?} from the database).
 // pos: [x, y, height above ground].
 export function setupUnit(chunk, unit, id, pos) {
