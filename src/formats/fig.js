@@ -11,6 +11,8 @@ import { readRes, writeRes } from './res.js';
 
 export function readFig(u8) {
   const r = new Reader(u8);
+  if (u8.length >= 3 && r.str(3) !== 'FIG') return readLegacyFig(u8); // game.exe takes this path for anything not "FIG"
+  r.p = 0;
   if (r.str(4) !== 'FIG8') throw new Error('Не FIG8');
   const [vb, nb, uvc, ic, vcc, mcc, , group, tex] = Array.from({ length: 9 }, () => r.u32());
   const bounds = u8.slice(r.p, r.p + 320); r.p += 320;
@@ -31,6 +33,33 @@ export function readFig(u8) {
   const morphs = new Uint16Array(mcc * 2);
   for (let i = 0; i < mcc * 2; i++) morphs[i] = r.u16();
   return { variants, normals, uv, indices, comps, morphs, bounds, group, texture: tex };
+}
+
+// Headerless legacy mesh (sky nask0sky, some init*/efcu* items, unmoog, waterfalls), game.exe 0x4F87D0:
+// u32 group, texture; bounds for 6 variants (240 bytes); u32 vb + vb blocks {x,y,z}[6][4]; u32 nb + normal
+// blocks; u32 uvc + uv; u32 n + n x 52-byte triangles (unused); u32 vcc + comps; u32 mcc + morph pairs;
+// u32 ic + u16 indices. The 6 variants map onto the 8 trilinear corners as [v0,v1,v2,v2,v3,v4,v5,v5]
+// (dex replaces the str blend). Read-only: writeFig saves it back as FIG8.
+function readLegacyFig(u8) {
+  const r = new Reader(u8), group = r.u32(), tex = r.u32();
+  r.p += 240;
+  const count = per => { const n = r.u32(); if (n * per > u8.length - r.p) throw new Error('Меш без FIG8: неверный размер'); return n; };
+  const vb = count(288), six = Array.from({ length: 6 }, () => new Float32Array(vb * 12));
+  for (let b = 0; b < vb; b++) for (let axis = 0; axis < 3; axis++) for (let v = 0; v < 6; v++) for (let k = 0; k < 4; k++) six[v][(b * 4 + k) * 3 + axis] = r.f32();
+  const nb = count(64), normals = new Float32Array(nb * 12);
+  for (let b = 0; b < nb; b++) for (let axis = 0; axis < 4; axis++) for (let k = 0; k < 4; k++) { const v = r.f32(); if (axis < 3) normals[(b * 4 + k) * 3 + axis] = v; }
+  const uv = new Float32Array(count(8) * 2);
+  for (let i = 0; i < uv.length; i++) uv[i] = r.f32();
+  const tris = count(52); r.p += tris * 52; // not `r.p += count()`: that reads r.p before count advances it
+  const comps = new Uint16Array(count(6) * 3);
+  for (let i = 0; i < comps.length; i++) comps[i] = r.u16();
+  const mcc = count(4); r.p += mcc * 4;
+  const indices = new Uint16Array(count(2));
+  for (let i = 0; i < indices.length; i++) indices[i] = r.u16();
+  const lim = [nb * 4, vb * 4, uv.length / 2];
+  comps.forEach((c, i) => { if (c >= lim[i % 3]) throw new Error('Меш без FIG8: индекс вне диапазона'); });
+  const variants = [0, 1, 2, 2, 3, 4, 5, 5].map(v => six[v]);
+  return { variants, normals, uv, indices, comps, morphs: null, bounds: null, group, texture: tex, legacy: true };
 }
 
 // Inverse of readFig. Missing bounds are computed; missing morph pairs default to identity over
@@ -143,15 +172,16 @@ export function readAnmTrack(u8) {
 // Whole model: { parts: [{name, parent, fig, bon}] } from the .mod and .bon RES blobs.
 export function readModel(modU8, bonU8, name) {
   const files = readRes(modU8);
-  const isFig = f => String.fromCharCode(...f.data.subarray(0, 4)) === 'FIG8';
-  const lnkEntry = files.find(f => f.name.toLowerCase() === name.toLowerCase() && !isFig(f)) || files.find(f => !isFig(f));
-  const links = lnkEntry ? readLnk(lnkEntry.data) : files.map(f => ({ name: f.name, parent: '' }));
+  // The LNK is named after the model; other entries are FIG8 or legacy headerless meshes.
+  const figs = new Map();
+  let lnk = files.find(f => f.name.toLowerCase() === name.toLowerCase());
+  for (const f of files) if (f !== lnk) {
+    if (String.fromCharCode(...f.data.subarray(0, 4)) === 'FIG8') { figs.set(f.name.toLowerCase(), readFig(f.data)); continue; }
+    try { figs.set(f.name.toLowerCase(), readLegacyFig(f.data)); } catch { lnk ??= f; }
+  }
+  const links = lnk ? readLnk(lnk.data) : files.map(f => ({ name: f.name, parent: '' }));
   const bons = new Map(bonU8 ? readRes(bonU8).map(f => [f.name.toLowerCase(), readBon(f.data)]) : []);
-  const figs = new Map(files.filter(isFig).map(f => [f.name.toLowerCase(), f.data]));
-  const parts = links.map(l => {
-    const raw = figs.get(l.name.toLowerCase());
-    return { name: l.name, parent: l.parent, fig: raw ? readFig(raw) : null, bon: bons.get(l.name.toLowerCase()) || null };
-  });
+  const parts = links.map(l => ({ name: l.name, parent: l.parent, fig: figs.get(l.name.toLowerCase()) || null, bon: bons.get(l.name.toLowerCase()) || null }));
   return { parts };
 }
 

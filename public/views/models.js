@@ -12,7 +12,7 @@ const PREFIX = { un: 'Существа', st: 'Строения и объекты
 
 export async function mount(root, [nameArg]) {
   const all = (await api.resList('Res/figures.res')).map(e => e.name.toLowerCase());
-  const models = all.filter(n => n.endsWith('.mod')).map(n => n.slice(0, -4)).sort();
+  const models = [...new Set(all.filter(n => n.endsWith('.mod') || n.endsWith('.fig')).map(n => n.slice(0, -4)))].sort(); // .fig: single-mesh items and the sky
   const anims = new Set(all.filter(n => n.endsWith('.anm')).map(n => n.slice(0, -4)));
   const textures = (await api.resList('Res/textures.res')).map(e => e.name.replace(/\.mmp$/i, ''));
   const st = { name: nameArg || 'unmoog1', filter: '', tex: null, cx: [0.5, 0.5, 0.5], anim: null, frame: 0, playing: true, model: null, anims: [] };

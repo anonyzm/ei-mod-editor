@@ -13,6 +13,7 @@ import { parseSchema, dbForFile, readDatabase, writeDatabase, fieldView, textToF
 import * as M from './src/formats/mob.js';
 import { readMpr, writeMpr, updateNormals, markDirty, heightAt, packNormal, TILE_TYPES } from './src/formats/mpr.js';
 import { decodeMmp, mmpInfo, encodeMmpArgb8 } from './src/formats/mmp.js';
+import { readSav, writeSav, savVars, setSavVars } from './src/formats/sav.js';
 import { readModel, writeModel, readFig, writeFig, readLnk, writeLnk } from './src/formats/fig.js';
 import { objToParts } from './src/formats/obj.js';
 import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRect } from './src/formats/aigraph.js';
@@ -843,6 +844,28 @@ tool('zone_maps', 'Перерисовать миникарту и карту ц�
   }
   resUpdate('Res/textures.res', [{ name: miniName + '.mmp', data: encodeMmpArgb8(mi.width, mi.height, mini) }, { name: questName + '.mmp', data: encodeMmpArgb8(QW, QH, quest) }]);
   return { minimap: miniName + '.mmp', objectives: questName + '.mmp', map_px: [top.w, top.h] };
+});
+
+// ---- save games ----
+// A save keeps every visited zone's creatures, levers and compiled script (<zone>.sav, the current one in
+// mission.sav), so map/script edits of an already visited zone don't reach it; static objects always come
+// from the map. Global script variables (GSSetVar: z.<zone>, q.<quest>…) live in scenario.sav.
+const saveRel = (slot, f) => `saves/${/^save\w+$/.test(slot) ? slot : fail('save: имя папки сейва, например save46')}/${f}`;
+tool('saves_list', 'Сейвы игры: папка, остров и зона, в которой сохранились, время и уже посещённые зоны (их состояние сейв хранит сам — правки скрипта и существ этих зон в сейв не попадут, статичные объекты берутся из карты всегда).', { allod: S.str('Фильтр по острову') }, [], () => listDir('saves').filter(s => /^save\w+$/.test(s)).flatMap(slot => {
+  if (!exists(saveRel(slot, 'info.sav'))) return [];
+  const info = readGameFile(saveRel(slot, 'info.sav')), [allod, zone] = Buffer.from(info.subarray(12)).toString('latin1').split('\0');
+  return [{ save: slot, allod, zone, time: fs.statSync(gamePath(saveRel(slot, 'info.sav'))).mtime.toISOString().slice(0, 16).replace('T', ' '), visited: listDir('saves/' + slot).filter(f => /^[gb]z\w+\.sav$/i.test(f)).map(f => f.slice(0, -4)) }];
+}).sort((a, b) => a.time.localeCompare(b.time)));
+tool('save_vars', 'Глобальные переменные скрипта в сейве (scenario.sav): чтение по префиксу и запись. Нужны, например, чтобы открыть переход в уже посещённой зоне: z.<переход> = 1 (0 — закрыт), z.<зона> = 1 (доступна) или 2 (посещена). Оригинал сейва сохраняется в бэкап.', { save: S.str('Папка сейва, например save46'), prefix: S.str('Показать переменные с этим началом, например "z."'), set: S.obj('{имя: число} — записать') }, ['save'], a => {
+  const rel = saveRel(a.save, 'scenario.sav'), s = readSav(readGameFile(rel));
+  if (!s.ok) fail('Контрольная сумма scenario.sav не сходится — сейв не трогаю');
+  if (a.set) {
+    for (const [k, v] of Object.entries(a.set)) if (!/^[\x21-\x7e]+$/.test(k) || !Number.isFinite(+v)) fail(`Переменная ${k}=${v}: имя латиницей без пробелов, значение — число`);
+    s.data = setSavVars(s.data, Object.fromEntries(Object.entries(a.set).map(([k, v]) => [k, +v])));
+    saveGameFile(rel, writeSav(s, s.data));
+  }
+  const vars = savVars(s.data);
+  return { save: a.save, ...(a.set ? { saved: rel } : {}), vars: Object.fromEntries(Object.entries(vars).filter(([k]) => k.startsWith(a.prefix ?? 'z.'))) };
 });
 
 // ---- models ----

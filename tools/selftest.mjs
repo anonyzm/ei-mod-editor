@@ -7,13 +7,14 @@ import assert from 'node:assert/strict';
 import { readRes, writeRes, isRes } from '../src/formats/res.js';
 import { readReg, writeReg, regToText, textToReg } from '../src/formats/reg.js';
 import { parseSchema, dbForFile, readDatabase, writeDatabase, fieldView, textToField } from '../src/formats/db.js';
-import { readMob, writeMob, getScript, setScript, listObjects, codec, walk, getField, OBJ, cloneChunk } from '../src/formats/mob.js';
+import { readMob, writeMob, getScript, setScript, listObjects, codec, walk, child, getField, OBJ, cloneChunk } from '../src/formats/mob.js';
 import { readMpr, writeMpr, newMpr } from '../src/formats/mpr.js';
 import { decodeMmp, encodeMmpArgb8 } from '../src/formats/mmp.js';
 import { readModel, readAnimations, readFig, writeFig, readBon, writeBon, writeModel, figGeometry } from '../src/formats/fig.js';
 import { objToParts } from '../src/formats/obj.js';
 import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRect } from '../src/formats/aigraph.js';
 import { gameCatalog, setupUnit, setupObject } from '../src/shared/catalog.js';
+import { readSav, savVars, setSavVars } from '../src/formats/sav.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cfg = (() => { try { return JSON.parse(fs.readFileSync(path.join(here, '..', 'config.json'), 'utf8')); } catch { return {}; } })();
@@ -62,16 +63,17 @@ check('DB: all tables byte-identical, all fields editable', () => {
 });
 
 check('MOB: every map byte-identical, scripts decrypt/encrypt', () => {
-  let objs = 0, strarr = 0;
+  let objs = 0, strarr = 0, plain = 0;
   for (const f of maps.filter(f => f.endsWith('.mob'))) {
     const u8 = read('Maps/' + f), m = readMob(u8);
     assert.ok(same(writeMob(m), u8), f);
     const s = getScript(m);
     if (s !== null) { setScript(m, s); assert.equal(getScript(readMob(writeMob(m))), s, f + ' script'); }
+    if (child(m.chunks.find(c => c.id === 0xa000), 0xacceecca)) { assert.match(s, /WorldScript|Script/, f + ' plain script'); plain++; }
     objs += listObjects(m).length;
     walk(m.chunks, c => { if (c.id === 0xbbbb0008 || c.id === 0xb00d) { assert.ok(same(codec.strarr.set(codec.strarr.get(c.data), c.id), c.data)); strarr++; } });
   }
-  return `${objs} objects, ${strarr} item lists`;
+  return `${objs} objects, ${strarr} item lists, ${plain} plain-text scripts`;
 });
 
 check('MPR: every landscape file keeps its sections', () => {
@@ -94,14 +96,17 @@ check('MMP: all textures decode, ARGB8 encoder roundtrips', () => {
 
 check('FIG: all models and animations parse', () => {
   const e = readRes(read('Res/figures.res')), by = new Map(e.map(x => [x.name.toLowerCase(), x.data]));
-  let models = 0, anims = 0;
+  let models = 0, anims = 0, legacy = 0;
   for (const x of e.filter(x => x.name.endsWith('.mod'))) {
     const n = x.name.slice(0, -4), m = readModel(x.data, by.get(n + '.bon'), n);
     for (const p of m.parts) if (p.fig) { const nv = p.fig.variants[0].length / 3; for (let i = 1; i < p.fig.comps.length; i += 3) assert.ok(p.fig.comps[i] < nv, n); }
     models++;
+    legacy += m.parts.filter(p => p.fig?.legacy).length;
     if (by.has(n + '.anm')) anims += readAnimations(by.get(n + '.anm')).length;
   }
-  return `${models} models, ${anims} animations`;
+  for (const x of e.filter(x => x.name.endsWith('.fig'))) if (readFig(x.data).legacy) legacy++;
+  assert.ok(readFig(by.get('nask0sky.fig')).legacy, 'nask0sky legacy');
+  return `${models} models, ${anims} animations, ${legacy} headerless meshes`;
 });
 
 check('FIG/BON writers: every game mesh rebuilds byte-for-byte', () => {
@@ -152,6 +157,24 @@ check('AI graph: builder agrees with the original on >= 85% of human-class edges
   for (let i = 0; i < a.length; i++) if ((a[i] === 0xffff) === (b[i] === 0xffff)) ok++;
   assert.ok(ok / a.length >= 0.85, `${(100 * ok / a.length).toFixed(1)}%`);
   return `${(100 * ok / a.length).toFixed(1)}% of edges`;
+});
+
+check('Saves: a new scenario variable grows every chunk around the table', () => {
+  let n = 0;
+  for (const s of fs.existsSync(path.join(G, 'saves')) ? fs.readdirSync(path.join(G, 'saves')) : []) {
+    const f = path.join(G, 'saves', s, 'scenario.sav');
+    if (!fs.existsSync(f)) continue;
+    const sv = readSav(new Uint8Array(fs.readFileSync(f)));
+    if (!sv.ok) continue;
+    const d = sv.data, d2 = setSavVars(d, { 'zz.selftest': 2 }), grow = 'zz.selftest'.length + 5;
+    const root = x => x[0] & 1 ? new DataView(x.buffer).getUint32(0, true) >>> 1 : new DataView(x.buffer).getUint16(0, true) >>> 1;
+    assert.equal(root(d2), root(d) + grow, s + ' root length');
+    const tail = (d[0] & 1 ? 4 : 2) + root(d);
+    assert.ok(same(d2.subarray(tail + grow), d.subarray(tail)), s + ' data after the root chunk');
+    assert.equal(savVars(d2)['zz.selftest'], 2, s);
+    n++;
+  }
+  return `${n} saves`;
 });
 
 const catalog = await gameCatalog(rel => Promise.resolve(read(rel)), maps);

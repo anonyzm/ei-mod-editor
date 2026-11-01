@@ -7,11 +7,15 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { GAME } from '../src/game.js';
+import { readSav } from '../src/formats/sav.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url)), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ei-mcp-'));
 const game = path.join(tmp, 'game');
 for (const f of ['database.res', 'databaselmp.res', 'texts.res', 'textslmp.res', 'textures.res', 'figures.res', 'menus.res']) fs.cpSync(path.join(GAME, 'Res', f), path.join(game, 'Res', f));
 fs.cpSync(path.join(GAME, 'Maps'), path.join(game, 'Maps'), { recursive: true });
+// a save whose scenario checksum matches (a few real saves don't, and save_vars refuses those)
+const saveSlot = fs.existsSync(path.join(GAME, 'saves')) ? fs.readdirSync(path.join(GAME, 'saves')).find(s => fs.existsSync(path.join(GAME, 'saves', s, 'scenario.sav')) && readSav(new Uint8Array(fs.readFileSync(path.join(GAME, 'saves', s, 'scenario.sav')))).ok) : null;
+if (saveSlot) fs.cpSync(path.join(GAME, 'saves', saveSlot), path.join(game, 'saves', saveSlot), { recursive: true });
 
 const proc = spawn(process.execPath, [path.join(here, '..', 'mcp.js')], { env: { ...process.env, EI_GAME_DIR: game, EI_BACKUP_DIR: path.join(tmp, 'backup') }, stdio: ['pipe', 'pipe', 'inherit'] });
 let buf = '', nextId = 1;
@@ -65,6 +69,12 @@ try {
     assert.equal(z.mpr, 'Maps/mcptest.mpr');
     assert.ok((await call('zone_get', { id: 'mcptest' })).includes('#res\nmcptest mcptest'));
     assert.ok((await call('zones_list', { allod: 'gipat' })).some(b => b.id === 'gz1g_mcptest'));
+    // variables are set from a trigger Script; WorldScript itself starts with Sleep like every original map
+    for (const mob of ['mcptest', 'zone1']) {
+      const s = await call('map_script_get', { mob }), w = s.slice(s.lastIndexOf('WorldScript'));
+      assert.match(w, /^WorldScript\s*\(\s*Sleep\(/, mob); assert.doesNotMatch(w, /GSSetVar/, mob);
+    }
+    assert.match(await call('map_script_get', { mob: 'zone1' }), /Script VTriger#0#mcptest[\s\S]*GSSetVar\( 0, "z\.gz1g_mcptest", 1 \)/);
   });
   await check('terrain sculpt/heights/paint', async () => {
     const info = await call('terrain_info', { mpr: 'mcptest' }); assert.deepEqual(info.size_m, [128, 128]);
@@ -128,7 +138,15 @@ try {
     const s = await call('map_script_get', { mob: 'mcptest' }); assert.ok(s.includes('WorldScript'));
     await call('map_script_set', { mob: 'mcptest', script: s.replace('Sleep( 1 )', 'Sleep( 2 )') });
     assert.ok((await call('map_script_get', { mob: 'mcptest' })).includes('Sleep( 2 )'));
-    assert.ok((await call('map_script_get', { mob: 'zone1' })).includes('z.mcptest'), 'exit opened in linked zone');
+    assert.ok((await call('map_script_get', { mob: 'zone1' })).includes('GSSetVar( 0, "z.gz1g_mcptest", 1 )'), 'exit opened in linked zone (edges: 0 closed, 1 open)');
+  });
+  if (saveSlot) await check('save games: list, variables', async () => {
+    const l = await call('saves_list'); assert.ok(l.some(s => s.save === saveSlot && s.zone), JSON.stringify(l));
+    const before = (await call('save_vars', { save: saveSlot })).vars;
+    const after = (await call('save_vars', { save: saveSlot, set: { 'z.mcptest': 1, 'z.gz1g_mcptest': 1 } })).vars;
+    assert.equal(after['z.mcptest'], 1); assert.equal(Object.keys(after).length, Object.keys(before).length + 2);
+    assert.equal((await call('save_vars', { save: saveSlot })).vars['z.gz1g_mcptest'], 1, 're-read packed→unpacked save');
+    return `${saveSlot}: ${Object.keys(before).length} z.* vars`;
   });
   await check('globe + zone maps', async () => {
     const gi = await call('globe_info', { allod: 'gipat' });
