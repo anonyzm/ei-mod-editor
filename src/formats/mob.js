@@ -80,11 +80,13 @@ export function encodeScript(text, key = 0x296c) {
 export function getScript(mob) {
   const root = mob.chunks.find(c => c.id === 0xa000);
   const s = root?.children.find(c => SCRIPT_IDS.includes(c.id));
-  return s ? decodeScript(s.data) : null;
+  if (!s) return null;
+  return s.id === 0xacceecca ? cp1251.decode(s.data) : decodeScript(s.data); // ACCEECCA is plain text (zone20, main menu)
 }
 export function setScript(mob, text) {
   const root = mob.chunks.find(c => c.id === 0xa000);
   const s = root.children.find(c => SCRIPT_IDS.includes(c.id));
+  if (s?.id === 0xacceecca) { s.data = cp1251.encode(text); return; }
   const key = s ? new DataView(s.data.buffer, s.data.byteOffset, 4).getUint32(0, true) : 0x296c;
   if (s) s.data = encodeScript(text, key); else root.children.splice(1, 0, { id: 0xacceeccb, data: encodeScript(text, key) });
 }

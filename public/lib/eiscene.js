@@ -117,7 +117,7 @@ export function forgetCached(name) {
 // Builds a hierarchy of part meshes; returns null if the model is missing.
 // `data` (from readModel) and `map` (a texture) let callers preview a model not yet in the game files.
 export async function buildModel(name, { texture, complection = [0.5, 0.5, 0.5], material, data, map } = {}) {
-  data ||= await loadModelData(name);
+  data ||= await loadModelData(name) || await loadFigModel(name);
   if (!data) return null;
   const tex = map || (texture ? await gameTexture(texture) : null);
   const mat = material || new THREE.MeshLambertMaterial({ map: tex, color: tex ? 0xffffff : 0xb0a890, alphaTest: 0.5, side: THREE.DoubleSide });

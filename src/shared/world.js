@@ -17,7 +17,17 @@ export function parseWorld(text) {
 }
 export const worldText = w => w.head + w.blocks.map(b => b.text).join('');
 export const directive = (text, name) => { const m = text.match(new RegExp(`^#${name}\\s*\\r?\\n([^#\\r\\n][^\\r\\n]*)`, 'mi')); return m?.[1].trim(); };
-export const exitsOf = text => [...text.matchAll(/^#exit\s+(\d+)\s*\r?\n\s*(\S+)\s+(\S+)/gmi)].map(m => ({ n: +m[1], to: m[2], entrance: +m[3] }));
+// Adds a one-shot trigger Script with these statements and starts it at the end of WorldScript.
+// Original maps set variables only inside such Scripts and begin WorldScript with Sleep; a GSSetVar
+// straight in WorldScript stopped the whole zone script in game (no triggers, exits stayed closed).
+export function addTrigger(script, name, statements) {
+  const w = script.lastIndexOf('WorldScript'), end = script.lastIndexOf(')');
+  if (w < 0 || end < w) throw new Error('В скрипте карты нет WorldScript');
+  const body = statements.map(s => `    ${s} \r\n`).join('');
+  return script.slice(0, w) + `DeclareScript ${name} (  this : object )\r\n\r\nScript ${name}\r\n(\r\n  if\r\n  (\r\n  )\r\n  then\r\n  (\r\n    KillScript(  ) \r\n${body}  )\r\n)\r\n\r\n`
+    + script.slice(w, end).replace(/\s*$/, '') + `\r\n  ${name}( NULL ) \r\n` + script.slice(end);
+}
+export const exitsOf = text =>[...text.matchAll(/^#exit\s+(\d+)\s*\r?\n\s*(\S+)\s+(\S+)/gmi)].map(m => ({ n: +m[1], to: m[2], entrance: +m[3] }));
 
 export async function loadWorld(io) {
   return parseWorld(cp1251.decode(readRes(await io.file('Res/texts.res')).find(e => e.name.toLowerCase() === 'map.txt').data));
@@ -75,7 +85,9 @@ export async function createZone(io, world, opts) {
   const objs = rootChunk.children.find(c => c.id === 0xb000); if (objs) objs.children = [];
   rootChunk.children = rootChunk.children.filter(c => c.id !== 0x1e00 && c.id !== 0xe000); // editor metadata of the old map
   mob.chunks = [...mob.chunks.filter(c => c.id !== AIGRAPH_ID), { id: AIGRAPH_ID, data: writeAiGraph(graph) }];
-  setScript(mob, 'GlobalVars (\r\n  NULL : object\r\n)\r\n\r\nWorldScript\r\n(\r\n  Sleep( 1 )\r\n)\r\n');
+  // the zone marks itself visited and keeps the way back open
+  setScript(mob, addTrigger(`GlobalVars (\r\n  NULL : object\r\n)\r\n\r\nWorldScript\r\n(\r\n  Sleep( 1 ) \r\n)\r\n`, 'VTriger#0#9000',
+    [`GSSetVarMax( 0, "z.${id}", 2 )`, ...link ? [`GSSetVar( 0, "z.${link.id}_${id}", 1 )`] : []]));
   await io.saveFile(`Maps/${file}.mob`, writeMob(mob));
   // world graph
   const cx = (map.W - 1) / 2, cy = (map.H - 1) / 2;
@@ -91,7 +103,8 @@ export async function createZone(io, world, opts) {
       const [, linkMob] = directive(link.text, 'res').split(/\s+/);
       const lm = readMob(await io.file(`Maps/${linkMob}.mob`));
       const s = getScript(lm) || '';
-      setScript(lm, s.replace(/WorldScript\s*\(/, m => `${m}\r\n  GSSetVar( 0, "z.${id}", 2 )\r\n  GSSetVar( 0, "z.${edge}", 2 )`));
+      // as in the original scripts: edge z.a_b is 0 closed / 1 open; zone z.x is 1 available, 2 visited
+      setScript(lm, addTrigger(s, `VTriger#0#${id}`, [`GSSetVarMax( 0, "z.${id}", 1 )`, `GSSetVar( 0, "z.${edge}", 1 )`]));
       await io.saveFile(`Maps/${linkMob}.mob`, writeMob(lm));
     }
   } else world.blocks.push({ id, allod, type: 'game', text: block });
