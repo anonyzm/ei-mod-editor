@@ -87,7 +87,7 @@ export async function createZone(io, world, opts) {
   mob.chunks = [...mob.chunks.filter(c => c.id !== AIGRAPH_ID), { id: AIGRAPH_ID, data: writeAiGraph(graph) }];
   // the zone marks itself visited and keeps the way back open
   setScript(mob, addTrigger(`GlobalVars (\r\n  NULL : object\r\n)\r\n\r\nWorldScript\r\n(\r\n  Sleep( 1 ) \r\n)\r\n`, 'VTriger#0#9000',
-    [`GSSetVarMax( 0, "z.${id}", 2 )`, ...link ? [`GSSetVar( 0, "z.${link.id}_${id}", 1 )`] : []]));
+    [`GSSetVarMax( 0, "z.${id}", 2 )`, ...link ? [`GSSetVar( 0, "z.${link.id}_${id}", 0 )`] : []]));
   await io.saveFile(`Maps/${file}.mob`, writeMob(mob));
   // world graph
   const cx = (map.W - 1) / 2, cy = (map.H - 1) / 2;
@@ -103,8 +103,9 @@ export async function createZone(io, world, opts) {
       const [, linkMob] = directive(link.text, 'res').split(/\s+/);
       const lm = readMob(await io.file(`Maps/${linkMob}.mob`));
       const s = getScript(lm) || '';
-      // as in the original scripts: edge z.a_b is 0 closed / 1 open; zone z.x is 1 available, 2 visited
-      setScript(lm, addTrigger(s, `VTriger#0#${id}`, [`GSSetVarMax( 0, "z.${id}", 1 )`, `GSSetVar( 0, "z.${edge}", 1 )`]));
+      // edge z.a_b: the exit works unless it is exactly 1 (game.exe 0x636f10: 0 or unset = open, 1 = closed);
+      // zone z.x is 1 available, 2 visited
+      setScript(lm, addTrigger(s, `VTriger#0#${id}`, [`GSSetVarMax( 0, "z.${id}", 1 )`, `GSSetVar( 0, "z.${edge}", 0 )`]));
       await io.saveFile(`Maps/${linkMob}.mob`, writeMob(lm));
     }
   } else world.blocks.push({ id, allod, type: 'game', text: block });

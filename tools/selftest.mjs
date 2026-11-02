@@ -7,9 +7,9 @@ import assert from 'node:assert/strict';
 import { readRes, writeRes, isRes } from '../src/formats/res.js';
 import { readReg, writeReg, regToText, textToReg } from '../src/formats/reg.js';
 import { parseSchema, dbForFile, readDatabase, writeDatabase, fieldView, textToField } from '../src/formats/db.js';
-import { readMob, writeMob, getScript, setScript, listObjects, codec, walk, child, getField, OBJ, cloneChunk } from '../src/formats/mob.js';
+import { readMob, writeMob, getScript, setScript, listObjects, codec, walk, child, getField, OBJ, cloneChunk, briefingUnitId } from '../src/formats/mob.js';
 import { readMpr, writeMpr, newMpr } from '../src/formats/mpr.js';
-import { decodeMmp, encodeMmpArgb8 } from '../src/formats/mmp.js';
+import { decodeMmp, encodeMmpArgb8, encodeMmpDxt1 } from '../src/formats/mmp.js';
 import { readModel, readAnimations, readFig, writeFig, readBon, writeBon, writeModel, figGeometry } from '../src/formats/fig.js';
 import { objToParts } from '../src/formats/obj.js';
 import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRect } from '../src/formats/aigraph.js';
@@ -62,6 +62,14 @@ check('DB: all tables byte-identical, all fields editable', () => {
   return `${fields} fields`;
 });
 
+check('MOB: base NPC ids are the briefing hash of their names', () => {
+  let n = 0;
+  for (const f of maps.filter(f => f.endsWith('.mob'))) for (const o of listObjects(readMob(read('Maps/' + f)))) { const id = getField(o.node, OBJ.id); if (id >= 1e9 && id < 2e9 && briefingUnitId(getField(o.node, OBJ.name)) === id) n++; }
+  assert.equal(briefingUnitId('Elder'), 1000054752); assert.equal(briefingUnitId('OLiz'), 1000012230);
+  assert.ok(n >= 50, n + ' matches');
+  return `${n} NPCs`;
+});
+
 check('MOB: every map byte-identical, scripts decrypt/encrypt', () => {
   let objs = 0, strarr = 0, plain = 0;
   for (const f of maps.filter(f => f.endsWith('.mob'))) {
@@ -91,6 +99,11 @@ check('MMP: all textures decode, ARGB8 encoder roundtrips', () => {
   for (const res of ['Res/textures.res', 'Res/redress.res', 'Res/menus.res']) for (const e of readRes(read(res))) if (e.name.endsWith('.mmp')) { decodeMmp(e.data); n++; }
   const px = new Uint8ClampedArray(8 * 8 * 4).map((_, i) => (i * 37) & 255);
   assert.ok(same(decodeMmp(encodeMmpArgb8(8, 8, px)).rgba, px));
+  // terrain atlases go back as DXT1 with the game's header and 5 levels
+  const atlas = readRes(read('Res/textures.res')).find(e => e.name.toLowerCase() === 'zone1000.mmp').data, img = decodeMmp(atlas), d1 = encodeMmpDxt1(512, 512, img.rgba, 5);
+  assert.ok(same(d1.subarray(0, 76), atlas.subarray(0, 76)) && d1.length === atlas.length, 'DXT1 header/size');
+  let err = 0; const back = decodeMmp(d1).rgba; for (let i = 0; i < back.length; i++) if (i % 4 !== 3) err += Math.abs(back[i] - img.rgba[i]);
+  assert.ok(err / (512 * 512) < 2, 'DXT1 error ' + err / (512 * 512));
   return `${n} textures`;
 });
 
@@ -186,6 +199,10 @@ check('Catalog: a creature and an object can be added to an empty map', () => {
     setupObject(cloneChunk(catalog.templates.get(0xb001)), catalog.objects[0], 9002, [3, 4, 0]));
   const back = listObjects(readMob(writeMob(mob)));
   assert.deepEqual(back.filter(o => o.kind !== 0xbbac0000).map(o => getField(o.node, OBJ.name)), ['GoblinA1-9001', `${catalog.objects[0].proto}-9002`]);
+  // route-less creature: mode 1 and home at its position (mode 2 without a route block stops the game)
+  const logic = back.find(o => getField(o.node, OBJ.name) === 'GoblinA1-9001').node.children.find(c => c.id === 0xbbbc0000);
+  assert.equal(getField(logic, [0xbbbc0003, 'u32']), 1);
+  assert.deepEqual(getField(logic, [0xbbbc0005, 'vec3']), [1, 2, 0]);
   return `${catalog.objects.length} object types`;
 });
 

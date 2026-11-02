@@ -12,13 +12,13 @@ import { readReg, writeReg, regToText, textToReg } from './src/formats/reg.js';
 import { parseSchema, dbForFile, readDatabase, writeDatabase, fieldView, textToField } from './src/formats/db.js';
 import * as M from './src/formats/mob.js';
 import { readMpr, writeMpr, updateNormals, markDirty, heightAt, packNormal, TILE_TYPES } from './src/formats/mpr.js';
-import { decodeMmp, mmpInfo, encodeMmpArgb8 } from './src/formats/mmp.js';
+import { decodeMmp, mmpInfo, encodeMmpArgb8, encodeMmpDxt1, FMT } from './src/formats/mmp.js';
 import { readSav, writeSav, savVars, setSavVars } from './src/formats/sav.js';
 import { readModel, writeModel, readFig, writeFig, readLnk, writeLnk } from './src/formats/fig.js';
 import { objToParts } from './src/formats/obj.js';
 import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRect } from './src/formats/aigraph.js';
 import { loadWorld, saveWorld, createZone, directive, exitsOf, ISLAND } from './src/shared/world.js';
-import { gameCatalog, setupUnit, setupObject, raceTexture } from './src/shared/catalog.js';
+import { gameCatalog, setupUnit, setupObject, raceTexture, unitStandsHome, unitTemplate } from './src/shared/catalog.js';
 import { encodePng, decodePng, resizeRgba } from './src/png.js';
 
 // ---------------- game access ----------------
@@ -185,6 +185,12 @@ async function editMob(a, fn) {
   return { ...out, saved: rel, ...(n ? { path_graph_nodes_rebuilt: n } : {}), ...(map ? {} : { warning: 'Ландшафт не найден — укажите mpr; высоты точек патруля посчитаны как 0' }) };
 }
 
+function setBriefingId(mob, o, f) {
+  if (!f.briefing) return;
+  const id = M.briefingUnitId(M.getField(o.node, M.OBJ.name) || ''), cur = M.getField(o.node, M.OBJ.id);
+  if (id !== cur && M.listObjects(mob).some(x => M.getField(x.node, M.OBJ.id) === id)) fail(`id ${id} уже занят другим объектом — дайте другое имя`);
+  M.setField(o.node, M.OBJ.id, id);
+}
 function applyObjFields(o, f) {
   const n = o.node, set = (s, v) => v !== undefined && M.setField(n, s, v);
   set(M.OBJ.name, f.name); set(M.OBJ.prototype, f.prototype); set(M.OBJ.model, f.model); set(M.OBJ.texture, f.texture);
@@ -193,6 +199,7 @@ function applyObjFields(o, f) {
   if (f.pos) { if (f.pos.length < 2 || !f.pos.every(Number.isFinite)) fail('pos: [x, y] или [x, y, высота над землёй]'); M.setField(n, M.OBJ.pos, [f.pos[0], f.pos[1], f.pos[2] ?? M.getField(n, M.OBJ.pos)?.[2] ?? 0]); }
   if (f.yaw !== undefined) M.setField(n, M.OBJ.rot, yawQuat(+f.yaw));
   if (o.kind === UNIT) {
+    if (f.pos) unitStandsHome(n); // a route-less creature keeps its home point at its position
     set(M.UNIT.unitPrototype, f.unit);
     for (const [k, s] of Object.entries({ weapons: M.UNIT.weapons, armors: M.UNIT.armors, spells: M.UNIT.spells, quick_items: M.UNIT.quickItems, quest_items: M.UNIT.questItems })) set(s, f[k]);
   }
@@ -307,7 +314,7 @@ function tileProbe(atl, tile) { // mean colour of [SW, SE, NE, NW corner, centre
   return [at(0, 0), at(e, 0), at(e, e), at(0, e), at(m, m)];
 }
 const rgbDist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-function autotile(map, classes, ops, rect) {
+function autotile(map, classes, ops, rect, exclude = []) {
   const atl = atlasImages(map), names = Object.keys(classes), VW = map.TW + 1, VH = map.TH + 1;
   if (!names.length) fail('classes: {"имя": [тайлы…]}');
   const probes = new Map(), probe = t => probes.get(t) ?? (probes.set(t, tileProbe(atl, t)), probes.get(t));
@@ -336,7 +343,8 @@ function autotile(map, classes, ops, rect) {
   }
   // candidates for mixed cells: every land tile of the atlases in 4 rotations
   const cands = [];
-  for (let t = 0; t < map.textures * 64; t++) if (atl[t >> 6] && map.tileTypes[t] !== 6 && map.tileTypes[t] !== 13) for (let r = 0; r < 4; r++) cands.push((r << 14) | t);
+  const skip = new Set(exclude); // decal tiles (flowers, cracks…) are placed by hand, never as fill or transition
+  for (let t = 0; t < map.textures * 64; t++) if (atl[t >> 6] && map.tileTypes[t] !== 6 && map.tileTypes[t] !== 13 && !skip.has(t)) for (let r = 0; r < 4; r++) cands.push((r << 14) | t);
   // uniform areas also use look-alike variants from all atlases (originals use ~500 distinct tiles per zone)
   const pools = names.map((n, ci) => [...new Set([...classes[n], ...cands.filter(c => c < 1 << 14 && probe(c).every(p => rgbDist(p, target[ci]) < 20) && probe(c).reduce((s, p) => s + rgbDist(p, target[ci]), 0) < 5 * 11)])]);
   const [tx0, ty0, tx1, ty1] = [Math.max(0, Math.floor(rect[0] / 2)), Math.max(0, Math.floor(rect[1] / 2)), Math.min(map.TW - 1, Math.floor(rect[2] / 2)), Math.min(map.TH - 1, Math.floor(rect[3] / 2))];
@@ -425,7 +433,7 @@ tool('db_record_get', 'Все поля записи: id, имя, тип, зна�
   const { t, db } = dbTable(loadDb(a.source), a.file, a.table), rec = dbRecord(db, t, a.record);
   return { index: t.records.indexOf(rec), name: recName(db, t, rec), fields: recordFields(db, t, rec) };
 });
-tool('db_record_set', 'Изменить поля записи. fields: {"Price": "120", "D.Min": "5"} — ключ это имя или id поля, для вложенных "Поле.Подполе". Значения — текстом, как их возвращает db_record_get (списки через запятую, BitList строкой 0/1).', { file: S.str(''), table: S.str(''), record: S.str('Индекс или имя'), fields: S.obj('{поле: значение}', { additionalProperties: { type: ['string', 'number'] } }), source: SOURCE }, ['file', 'table', 'record', 'fields'], a => {
+tool('db_record_set', 'Изменить поля записи. fields: {"Price": "120", "D.Min": "5"} — ключ это имя или id поля, для вложенных "Поле.Подполе", для повторяющихся "Поле.Подполе#N" (N с 0; N = число повторов — добавить ещё один). Значения — текстом, как их возвращает db_record_get (списки через запятую, BitList строкой 0/1).', { file: S.str(''), table: S.str(''), record: S.str('Индекс или имя'), fields: S.obj('{поле: значение}', { additionalProperties: { type: ['string', 'number'] } }), source: SOURCE }, ['file', 'table', 'record', 'fields'], a => {
   const D = loadDb(a.source), { f, t, db } = dbTable(D, a.file, a.table), rec = dbRecord(db, t, a.record), changed = {};
   for (const [key, value] of Object.entries(a.fields)) {
     const [k1, k2] = String(key).split('.');
@@ -433,7 +441,12 @@ tool('db_record_set', 'Изменить поля записи. fields: {"Price":
     let target = node, bid = t.id;
     if (k2 !== undefined) {
       bid = +(dbType(db, t.id, node.id)?.match(/\((\d+)\)/)?.[1] || 0);
-      target = findField(db, bid, node.children || [], k2) || fail(`Нет подполя ${k2} в ${k1}`);
+      // "Sub#N": N-th repeat of a repeated sub-field (acks phrases, item lists); N = count appends a copy of the last one
+      const [, name, rep] = k2.match(/^(.*?)(?:#(\d+))?$/), key2 = name.replace(/^field(\d+)$/, '$1'), kids = node.children || [];
+      const same = kids.filter(c => c === findField(db, bid, [c], key2)), n = +(rep ?? 0);
+      if (!same.length || n > same.length) fail(`Нет подполя ${k2} в ${k1}` + (same.length ? ` (повторов ${same.length}, #${same.length} — добавить)` : ''));
+      if (n === same.length) kids.splice(kids.indexOf(same.at(-1)) + 1, 0, structuredClone(same.at(-1)));
+      target = (node.children || []).filter(c => c === findField(db, bid, [c], key2))[n];
     }
     if (!target.data) fail(`${key} — составное поле, укажите подполе через точку`);
     const type = fieldView(dbType(db, bid, target.id), target.data).type;
@@ -470,56 +483,60 @@ tool('map_objects', 'Объекты карты: id, вид (unit, object, lever,
   return { total: all.length, objects: all.slice(0, a.limit ?? 200) };
 });
 tool('map_object_get', 'Все свойства объекта, для существ — снаряжение и маршруты патруля.', { mob: MOB, id: S.int('id объекта') }, ['mob', 'id'], a => objDetails(findObj(M.readMob(readGameFile(mapRel(a.mob, 'mob'))), a.id)));
-const OBJ_FIELDS = { name: S.str('Имя на карте (для скриптов)'), prototype: S.str(''), unit: S.str('Прототип существа из базы'), model: S.str('Модель из figures.res'), texture: S.str(''), pos: S.arr('[x, y] или [x, y, высота над землёй]', { type: 'number' }), yaw: S.num('Поворот, градусы'), complection: S.arr('[сила, ловкость, рост] 0…1', { type: 'number' }), player: S.int('Сторона/группа дипломатии'), quest_info: S.str(''), visible: S.int('0/1'), use_in_script: S.int('0/1'), weapons: S.arr('', { type: 'string' }), armors: S.arr('', { type: 'string' }), spells: S.arr('', { type: 'string' }), quick_items: S.arr('', { type: 'string' }), quest_items: S.arr('', { type: 'string' }) };
+const OBJ_FIELDS = { name: S.str('Имя на карте (для скриптов)'), prototype: S.str(''), unit: S.str('Прототип существа из базы'), model: S.str('Модель из figures.res'), texture: S.str(''), pos: S.arr('[x, y] или [x, y, высота над землёй]', { type: 'number' }), yaw: S.num('Поворот, градусы'), complection: S.arr('[сила, ловкость, рост] 0…1', { type: 'number' }), player: S.int('Сторона/группа дипломатии'), quest_info: S.str(''), visible: S.int('0/1'), use_in_script: S.int('0/1'), weapons: S.arr('', { type: 'string' }), armors: S.arr('', { type: 'string' }), spells: S.arr('', { type: 'string' }), quick_items: S.arr('', { type: 'string' }), quest_items: S.arr('', { type: 'string' }), briefing: S.int('1 — собеседник в базе (зона brief): id объекта станет 10⁹ + хэш имени, по нему игра находит персонажа для брифингов b.<имя>.<брифинг>') };
 tool('map_object_set', 'Изменить объект. Передавайте только меняемые поля. Граф проходимости вокруг объекта пересчитывается сам.', { mob: MOB, mpr: MPR, id: S.int(''), fields: S.obj('Поля объекта', { properties: OBJ_FIELDS }) }, ['mob', 'id', 'fields'], a => editMob(a, async ({ mob, mark }) => {
   const o = findObj(mob, a.id);
-  await mark(o); applyObjFields(o, a.fields); await mark(o);
+  await mark(o); applyObjFields(o, a.fields); setBriefingId(mob, o, a.fields); await mark(o);
   return objDetails(o);
 }));
 tool('objects_catalog', 'Каталог статичных объектов со всех зон игры (деревья, дома, камни, заборы…): прототип, модель, текстура, сколько раз встречается. Для map_object_add {object}.', { query: S.str('Подстрока прототипа/модели'), limit: S.int('По умолчанию 100') }, [], async a => {
   const q = (a.query || '').toLowerCase(), all = (await catalog()).objects.filter(o => !q || o.proto.toLowerCase().includes(q) || o.model.toLowerCase().includes(q));
   return { total: all.length, objects: all.slice(0, a.limit ?? 100) };
 });
-// One new object from spec {unit | object | copy_of, fields} (as map_object_add).
+const objectsContainer = mob => { const root = mob.chunks.find(c => c.id === 0xa000) || fail('В .mob нет корневого блока'); return root.children.find(c => c.id === 0xb000) || (root.children.push({ id: 0xb000, children: [] }), root.children.at(-1)); };
+// One new object from spec {unit | object | copy_of [+ from_mob], fields} (as map_object_add).
 async function addObject(mob, mark, a) {
   const id = M.maxObjectId(mob) + 1, pos = a.fields?.pos ? [a.fields.pos[0], a.fields.pos[1], a.fields.pos[2] ?? 0] : null;
   let node, kind, parent;
   if (a.copy_of !== undefined) {
-    const src = findObj(mob, a.copy_of);
-    node = M.cloneChunk(src.node); kind = src.kind; parent = src.parent;
+    const src = findObj(a.from_mob ? M.readMob(readGameFile(mapRel(a.from_mob, 'mob'))) : mob, a.copy_of);
+    node = M.cloneChunk(src.node); kind = src.kind; parent = a.from_mob ? objectsContainer(mob) : src.parent;
     M.setField(node, M.OBJ.id, id); M.setField(node, M.OBJ.name, (M.getField(node, M.OBJ.name) || '').replace(/-\d+$/, '') + '-' + id);
+    if (a.from_mob) { M.setField(node, M.OBJ.parentId, 0xffffffff); M.setField(node, M.QUEST_INFO, ''); if (kind === UNIT) for (const logic of node.children.filter(x => x.id === 0xbbbc0000)) logic.children = logic.children.filter(x => x.id !== 0xbbbd0000); }
     parent.children.splice(parent.children.indexOf(src.node) + 1, 0, node);
   } else {
     if (!pos) fail('Укажите fields.pos');
-    const { templates, objects } = await catalog();
+    const cat = await catalog(), { templates, objects } = cat;
     if (a.unit) {
       const u = unitPrototypes().find(x => x.name.toLowerCase() === a.unit.toLowerCase()) || fail(`Нет прототипа ${a.unit} (см. units_list)`);
-      kind = UNIT; node = setupUnit(M.cloneChunk(templates.get(UNIT)), u, id, pos);
+      kind = UNIT; node = setupUnit(M.cloneChunk(unitTemplate(cat, u)), u, id, pos);
     } else if (a.object) {
       const q = a.object.toLowerCase(), obj = objects.find(o => o.proto.toLowerCase() === q) || objects.find(o => o.model.toLowerCase() === q)
         || (loadRes(gamePath('Res/figures.res')).some(e => e.name.toLowerCase() === q + '.mod') ? { proto: a.object, model: a.object, texture: a.fields?.texture || a.object } : fail(`Нет объекта ${a.object} (см. objects_catalog, models_list)`));
       kind = 0xb001; node = setupObject(M.cloneChunk(templates.get(kind)), obj, id, pos);
     } else fail('Укажите unit, object или copy_of');
-    const root = mob.chunks.find(c => c.id === 0xa000) || fail('В .mob нет корневого блока');
-    parent = root.children.find(c => c.id === 0xb000) || (root.children.push({ id: 0xb000, children: [] }), root.children.at(-1));
+    parent = objectsContainer(mob);
     parent.children.push(node);
   }
   const o = { node, kind, parent };
-  applyObjFields(o, a.fields || {});
+  applyObjFields(o, a.fields || {}); setBriefingId(mob, o, a.fields || {});
   await mark(o);
   return objDetails(o);
 }
-tool('map_object_add', 'Добавить объект на любую карту, даже пустую новую: существо из базы (unit: прототип из units_list — модель, текстура и телосложение по расе), статичный объект из каталога (object: прототип или модель из objects_catalog, или своя импортированная модель) или копию объекта этой карты (copy_of: id). Много объектов сразу — items: [{unit | object | copy_of, fields}, …] (одно сохранение файла вместо сотен вызовов).', { mob: MOB, mpr: MPR, unit: S.str('Прототип существа'), object: S.str('Прототип или модель статичного объекта'), copy_of: S.int('id объекта-образца на этой карте'), fields: S.obj('Поля нового объекта; pos обязательно для unit и object', { properties: OBJ_FIELDS }), items: S.arr('Пакет: [{unit | object | copy_of, fields}, …]', { type: 'object' }) }, ['mob'], a => editMob(a, async ({ mob, mark }) => {
+tool('map_object_add', 'Добавить объект на любую карту, даже пустую новую: существо из базы (unit: прототип из units_list — модель, текстура и телосложение по расе), статичный объект из каталога (object: прототип или модель из objects_catalog, или своя импортированная модель) или копию объекта этой или другой карты (copy_of: id, from_mob). Много объектов сразу — items: [{unit | object | copy_of, fields}, …] (одно сохранение файла вместо сотен вызовов).', { mob: MOB, mpr: MPR, unit: S.str('Прототип существа'), object: S.str('Прототип или модель статичного объекта'), copy_of: S.int('id объекта-образца на этой карте (или на карте from_mob)'), from_mob: S.str('Карта, с которой копировать copy_of (сундук, рычаг, существо с другой карты; маршрут и quest_info не копируются)'), fields: S.obj('Поля нового объекта; pos обязательно для unit и object', { properties: OBJ_FIELDS }), items: S.arr('Пакет: [{unit | object | copy_of, fields}, …]', { type: 'object' }) }, ['mob'], a => editMob(a, async ({ mob, mark }) => {
   if (!a.items) return addObject(mob, mark, a);
   const added = [];
   for (const [i, it] of a.items.entries()) { try { added.push((await addObject(mob, mark, it)).id); } catch (e) { fail(`items[${i}]: ${e.message} (ничего не сохранено)`); } }
   return { added: added.length, ids: added };
 }));
-tool('map_object_delete', 'Удалить объект. Если скрипт карты ссылается на его имя, скрипт сломается — проверьте map_script_get.', { mob: MOB, mpr: MPR, id: S.int('') }, ['mob', 'id'], a => editMob(a, async ({ mob, mark }) => {
-  const o = findObj(mob, a.id), name = M.getField(o.node, M.OBJ.name);
-  await mark(o);
-  o.parent.children.splice(o.parent.children.indexOf(o.node), 1);
-  return { deleted: a.id, name };
+tool('map_object_delete', 'Удалить объект (id) или пачку объектов одним сохранением (ids). Если скрипт карты ссылается на имя, скрипт сломается — проверьте map_script_get.', { mob: MOB, mpr: MPR, id: S.int(''), ids: S.arr('Несколько id', { type: 'integer' }) }, ['mob'], a => editMob(a, async ({ mob, mark }) => {
+  const ids = a.ids ?? (a.id !== undefined ? [a.id] : fail('Укажите id или ids')), names = [];
+  for (const id of ids) {
+    const o = findObj(mob, id); names.push(M.getField(o.node, M.OBJ.name));
+    await mark(o);
+    o.parent.children.splice(o.parent.children.indexOf(o.node), 1);
+  }
+  return a.ids ? { deleted: ids.length } : { deleted: a.id, name: names[0] };
 }));
 tool('map_patrol_set', 'Маршрут патруля существа. points — новый маршрут целиком: точка [x, y] или {pos: [x, y], wait, param, flag} (высота берётся с земли); [] — убрать маршрут. edit — поправить отдельные точки, не трогая остальные: [{index, pos?, wait?, param?, flag?}]. wait — ожидание в точке (в оригиналах чаще 30…150, 3600 — стоять долго); param и flag — малоизученные поля (почти всегда 0). guard — точка охраны [x, y]. Существо должно иметь блок поведения (он есть у существ, добавленных map_object_add).', { mob: MOB, mpr: MPR, id: S.int('id существа'), points: S.arr('[[x, y] | {pos, wait, param, flag}, …]', {}), edit: S.arr('[{index, pos?, wait?, param?, flag?}]', { type: 'object' }), wait: S.int('Ожидание по умолчанию для точек без wait, 15'), guard: S.arr('Точка охраны [x, y] (необязательно)', { type: 'number' }) }, ['mob', 'id'], a => editMob(a, async ({ mob, gz }) => {
   const o = findObj(mob, a.id);
@@ -538,9 +555,30 @@ tool('map_patrol_set', 'Маршрут патруля существа. points �
     const w = wps[e.index] || fail(`Нет точки №${e.index} (точек: ${wps.length}, нумерация с 0)`);
     M.setWaypoint(w, { ...e, pos: e.pos && at(e.pos) });
   }
+  if (!wps.length) { logic.children = logic.children.filter(c => c !== p); unitStandsHome(o.node); } // [] = no route
   return objDetails(o);
 }));
 tool('map_script_get', 'Скрипт карты (язык скриптов ПЗ: GlobalVars, Declare/Script/WorldScript, триггеры).', { mob: MOB }, ['mob'], a => (M.getScript(M.readMob(readGameFile(mapRel(a.mob, 'mob')))) ?? '').replace(/\r\n/g, '\n'));
+// Diplomacy: ddddddd1 > ddddddd2 is a 32×32 i32 matrix [from][to]: 0 ally (self), 1 neutral, 2 enemy
+// (zone1: hero–villagers 1, hero–wolves 2). Script SetDiplomacy(a, b, v) uses v = value − 1.
+const DIPLO = ['ally', 'neutral', 'enemy'];
+tool('map_diplomacy', 'Дипломатия сторон карты (поле player у существ): кто кому враг. Матрица 32×32 [от][к]: ally (союз, 0), neutral (мир, 1), enemy (война, 2). Сторона 0 — герой. set: [{a, b, value, both?}] — both (по умолчанию true) ставит и b→a. Скриптом то же самое меняет SetDiplomacy( a, b, -1 война | 0 мир ).', { mob: MOB, set: S.arr('[{a, b, value: "ally" | "neutral" | "enemy"}]', { type: 'object' }), players: S.int('Сколько сторон показать (по умолчанию 10)') }, ['mob'], async a => {
+  const show = mob => {
+    const c = M.child(M.child(mob.chunks.find(x => x.id === 0xa000), 0xddddddd1) || fail('В .mob нет таблицы дипломатии'), 0xddddddd2) || fail('В .mob нет таблицы дипломатии');
+    return { c, dv: new DataView(c.data.buffer, c.data.byteOffset, c.data.byteLength) };
+  };
+  const n = Math.min(32, a.players ?? 10), table = mob => { const { dv } = show(mob); return Object.fromEntries(Array.from({ length: n }, (_, i) => [i, Array.from({ length: n }, (_, j) => DIPLO[dv.getInt32((i * 32 + j) * 4, true)] ?? dv.getInt32((i * 32 + j) * 4, true)).join(' ')])); };
+  if (!a.set?.length) return { legend: 'строка — сторона «от», столбцы 0…' + (n - 1), matrix: table(M.readMob(readGameFile(mapRel(a.mob, 'mob')))) };
+  return editMob(a, ({ mob }) => {
+    const { dv } = show(mob);
+    for (const e of a.set) {
+      const v = typeof e.value === 'number' ? e.value : DIPLO.indexOf(e.value);
+      if (!(v >= 0 && v <= 2) || !(e.a >= 0 && e.a < 32 && e.b >= 0 && e.b < 32) || e.a === e.b) fail('set: {a, b (0…31, разные), value: ally | neutral | enemy}');
+      dv.setInt32((e.a * 32 + e.b) * 4, v, true); if (e.both !== false) dv.setInt32((e.b * 32 + e.a) * 4, v, true);
+    }
+    return { matrix: table(mob) };
+  });
+});
 tool('map_script_set', 'Записать скрипт карты целиком (\\n станут \\r\\n). Сначала прочитайте текущий через map_script_get.', { mob: MOB, script: S.str('Полный текст скрипта') }, ['mob', 'script'], a => {
   const rel = mapRel(a.mob, 'mob'), mob = M.readMob(readGameFile(rel));
   M.setScript(mob, a.script.replace(/\r?\n/g, '\r\n'));
@@ -605,24 +643,25 @@ tool('terrain_paint', 'Рисовать текстурой земли пачко
   }
   return rect;
 }, { graph: false }));
-tool('terrain_autotile', 'Покраска земли с переходами, как на оригинальных картах. classes — классы земли и их «чистые» тайлы: {"grass": [0, 9, 10], "ground": [8], "stone": [1, 2, 3, 4]}. ops — формы {x, y, radius} или {x0, y0, x1, y1} с class: каждой вершине сетки (шаг 2 м) внутри формы назначается класс. Затем в затронутой области каждому тайлу подбирается тайл атласа с поворотом, у которого цвета углов совпадают с классами вершин (переходные тайлы трава→земля и т. п.); внутри однородных участков кладутся случайные тайлы класса. Остальные вершины получают класс по текущим тайлам.', { mpr: MPR, classes: S.obj('{класс: [тайлы]}'), ops: S.arr('Операции {форма, class}', { type: 'object' }) }, ['mpr', 'classes', 'ops'], a => {
+tool('terrain_autotile', 'Покраска земли с переходами, как на оригинальных картах. classes — классы земли и их «чистые» тайлы: {"grass": [0, 9, 10], "ground": [8], "stone": [1, 2, 3, 4]}. ops — формы {x, y, radius} или {x0, y0, x1, y1} с class: каждой вершине сетки (шаг 2 м) внутри формы назначается класс. Затем в затронутой области каждому тайлу подбирается тайл атласа с поворотом, у которого цвета углов совпадают с классами вершин (переходные тайлы трава→земля и т. п.); внутри однородных участков кладутся случайные тайлы класса. Остальные вершины получают класс по текущим тайлам.', { mpr: MPR, classes: S.obj('{класс: [тайлы]}'), ops: S.arr('Операции {форма, class}', { type: 'object' }) , exclude: S.arr('Тайлы, которые никогда не подбирать (декали вроде цветов — их кладут terrain_paint)', { type: 'integer' })}, ['mpr', 'classes', 'ops'], a => {
   let stats;
   return editMpr(a, map => {
     let rect = null;
     for (const op of a.ops) { const s = shapeOf({ radius: 2, ...op }, map); rect = unionRect(rect, [Math.floor(s.x0) - 2, Math.floor(s.y0) - 2, Math.ceil(s.x1) + 2, Math.ceil(s.y1) + 2]); }
     if (!rect) return null;
-    stats = autotile(map, a.classes, a.ops, rect);
+    stats = autotile(map, a.classes, a.ops, rect, a.exclude);
     return rect;
   }, { graph: false }).then(r => ({ ...r, ...stats }));
 });
-const LIQUIDS = { water: { type: 3, color: [0.19, 0.32, 0.65, 0.6], selfIllum: 0, wave: 0.5, warp: 0, reserved: [0, 0, 0] }, lava: { type: 3, color: [0.8, 0, 0, 1], selfIllum: 1, wave: 0.5, warp: 0, reserved: [0, 0, 0] } };
+const LIQUIDS = { water: { type: 3, color: [0.19, 0.32, 0.65, 0.6], selfIllum: 0, wave: 0.5, warp: 0, reserved: [0, 0, 0] }, lava: { type: 3, color: [0.8, 0, 0, 1], selfIllum: 1, wave: 0.5, warp: 0, reserved: [0, 0, 0] },
+  swamp: { type: 3, color: [0.19, 0.54, 0.36, 0.7], selfIllum: 0, wave: 0.5, warp: 0, reserved: [0, 0, 0] } }; // swamp: zone1/2/3obr/7 material
 function liquidMaterial(map, m) {
   if (Number.isInteger(m)) return m < map.materials.length ? m : fail(`material: 0…${map.materials.length - 1}`);
-  const p = LIQUIDS[m] || fail('material: "water", "lava" или номер материала');
+  const p = LIQUIDS[m] || fail('material: "water", "lava", "swamp" или номер материала');
   const i = map.materials.findIndex(x => x.type === p.type && x.selfIllum === p.selfIllum && Math.abs(x.color[0] - p.color[0]) < 0.1 && Math.abs(x.color[2] - p.color[2]) < 0.1);
   return i >= 0 ? i : map.materials.push(structuredClone(p)) - 1;
 }
-tool('terrain_water', 'Вода или лава (жидкость с поверхностью) пачкой операций. Форма: {x, y, radius} или {x0, y0, x1, y1}. level — высота поверхности, м; заливаются тайлы, где земля ниже level. material: "water", "lava" (материал добавится, если его нет) или номер; тайл поверхности — tile/tiles/type, как в terrain_paint (rot "random" по умолчанию). remove: true — убрать жидкость. Граф проходимости обновляется сам.', { mpr: MPR, ops: S.arr('Операции', { type: 'object' }) }, ['mpr', 'ops'], a => editMpr(a, map => {
+tool('terrain_water', 'Вода или лава (жидкость с поверхностью) пачкой операций. Форма: {x, y, radius} или {x0, y0, x1, y1}. level — высота поверхности, м; заливаются тайлы, где земля ниже level. material: "water", "lava", "swamp" (зелёная болотная вода; материал добавится, если его нет) или номер; тайл поверхности — tile/tiles/type, как в terrain_paint (rot "random" по умолчанию). remove: true — убрать жидкость. Граф проходимости обновляется сам.', { mpr: MPR, ops: S.arr('Операции', { type: 'object' }) }, ['mpr', 'ops'], a => editMpr(a, map => {
   let rect = null;
   const UP = packNormal(0, 0, 1);
   for (const op of a.ops) {
@@ -815,7 +854,8 @@ tool('zone_maps', 'Перерисовать миникарту и карту ц�
   // longest side of the map across the texture width (zone10: 256x192 m -> 256x192 px of a 256x256 minimap)
   const top = topView(map, { size: mi.width, grid: false }), mini = new Uint8Array(mi.width * mi.height * 4);
   for (let i = 3; i < mini.length; i += 4) mini[i] = 255;
-  for (let y = 0; y < Math.min(top.h, mi.height); y++) for (let x = 0; x < Math.min(top.w, mi.width); x++) mini.set(top.px.subarray((y * top.w + x) * 4, (y * top.w + x) * 4 + 4), (y * mi.width + x) * 4);
+  // game minimaps/objective maps store rows south first (zone10map vs its top view), topView is north first
+  for (let y = 0; y < Math.min(top.h, mi.height); y++) for (let x = 0; x < Math.min(top.w, mi.width); x++) mini.set(top.px.subarray(((top.h - 1 - y) * top.w + x) * 4, ((top.h - 1 - y) * top.w + x) * 4 + 4), (y * mi.width + x) * 4);
   const old = decodeMmp(resEntry('Res/textures.res', (a.parchment || questName) + '.mmp')), QW = old.width, QH = old.height;
   let base = Float32Array.from(old.rgba); // blur the old drawing away, keep parchment tone and torn edges
   for (let pass = 0; pass < 3; pass++) for (const horiz of [true, false]) {
@@ -832,8 +872,8 @@ tool('zone_maps', 'Перерисовать миникарту и карту ц�
   for (let y = 0; y < QH; y++) for (let x = 0; x < QW; x++) {
     const o = (y * QW + x) * 4, al = old.rgba[o + 3]; if (!al) continue;
     let col = [base[o], base[o + 1], base[o + 2]];
-    const wx = (x + 0.5) * mpp, wy = map.H - 1 - (y + 0.5) * mpp;
-    if (wy >= 0 && wx <= map.W - 1) {
+    const wx = (x + 0.5) * mpp, wy = (y + 0.5) * mpp;
+    if (wy <= map.H - 1 && wx <= map.W - 1) {
       const gx = (hz(wx + 1, wy) - hz(wx - 1, wy)) / 2, gy = (hz(wx, wy + 1) - hz(wx, wy - 1)) / 2, sl = Math.hypot(gx, gy);
       col = col.map(v => v * Math.max(0.72, Math.min(1.12, 1 - 0.21 * (gx - gy))));
       if (sl > 0.2) { const k = Math.min(0.6, (sl - 0.2) * 1.6); col = col.map((v, i) => v * (1 - k) + [92, 58, 20][i] * k); } // slope hatching
@@ -856,7 +896,7 @@ tool('saves_list', 'Сейвы игры: папка, остров и зона, �
   const info = readGameFile(saveRel(slot, 'info.sav')), [allod, zone] = Buffer.from(info.subarray(12)).toString('latin1').split('\0');
   return [{ save: slot, allod, zone, time: fs.statSync(gamePath(saveRel(slot, 'info.sav'))).mtime.toISOString().slice(0, 16).replace('T', ' '), visited: listDir('saves/' + slot).filter(f => /^[gb]z\w+\.sav$/i.test(f)).map(f => f.slice(0, -4)) }];
 }).sort((a, b) => a.time.localeCompare(b.time)));
-tool('save_vars', 'Глобальные переменные скрипта в сейве (scenario.sav): чтение по префиксу и запись. Нужны, например, чтобы открыть переход в уже посещённой зоне: z.<переход> = 1 (0 — закрыт), z.<зона> = 1 (доступна) или 2 (посещена). Оригинал сейва сохраняется в бэкап.', { save: S.str('Папка сейва, например save46'), prefix: S.str('Показать переменные с этим началом, например "z."'), set: S.obj('{имя: число} — записать') }, ['save'], a => {
+tool('save_vars', 'Глобальные переменные скрипта в сейве (scenario.sav): чтение по префиксу и запись. Это снимок на входе в текущую зону; живая таблица текущей зоны лежит в mission.sav. z.<переход> = 1 — переход закрыт, 0 или нет переменной — открыт; z.<зона> = 1 (доступна) или 2 (посещена). Оригинал сейва сохраняется в бэкап.', { save: S.str('Папка сейва, например save46'), prefix: S.str('Показать переменные с этим началом, например "z."'), set: S.obj('{имя: число} — записать') }, ['save'], a => {
   const rel = saveRel(a.save, 'scenario.sav'), s = readSav(readGameFile(rel));
   if (!s.ok) fail('Контрольная сумма scenario.sav не сходится — сейв не трогаю');
   if (a.set) {
@@ -903,12 +943,22 @@ tool('texture_import', 'Заменить или создать текстуру 
   const res = TEX_SRC[a.source || 'textures'], n = /\.mmp$/i.test(a.name) ? a.name : a.name + '.mmp', img = decodePng(fs.readFileSync(a.png_path));
   let old = null; try { old = mmpInfo(resEntry(res, n)); } catch { /* new texture */ }
   const w = old?.width ?? img.width, h = old?.height ?? img.height;
-  resUpdate(res, [{ name: n, data: encodeMmpArgb8(w, h, resizeRgba(img.rgba, img.width, img.height, w, h)) }]);
+  const px = resizeRgba(img.rgba, img.width, img.height, w, h);
+  resUpdate(res, [{ name: n, data: old?.format === FMT.DXT1 ? encodeMmpDxt1(w, h, px, old.mips) : encodeMmpArgb8(w, h, px) }]);
   return { texture: n, size: [w, h], created: !old };
 });
-tool('terrain_tile_import', 'Своя текстура земли: PNG кладётся в тайл атласа ландшафта (64×64, видимая часть — центральные 48×48, края — запас для стыков). Затем рисуйте этим тайлом через terrain_paint. Тип земли тайла (звук шагов, проходимость) задаётся type. Вместо PNG можно скопировать тайл из атласа другого ландшафта: from_mpr + from_tile (тип берётся оттуда). Атлас общий для всех карт с тем же именем ландшафта.', { mpr: MPR, tile: S.int('Код тайла atlas*64+index, который заменить'), png_path: S.str('PNG, лучше бесшовный; масштабируется до 48×48'), from_mpr: S.str('Или взять тайл из атласа другого ландшафта (например вода из zone5_1)…'), from_tile: S.int('…его код atlas*64+index'), type: S.str('Тип земли: grass, ground, stone, sand, rock, road, swamp… (необязательно)') }, ['mpr', 'tile'], async a => {
+tool('terrain_tile_import', 'Своя текстура земли: PNG кладётся в тайл атласа ландшафта (64×64, видимая часть — центральные 48×48, края — запас для стыков). Затем рисуйте этим тайлом через terrain_paint. Тип земли тайла (звук шагов, проходимость) задаётся type. Вместо PNG можно скопировать тайл из атласа другого ландшафта: from_mpr + from_tile (тип берётся оттуда), или целый атлас: atlas + from_mpr (+ from_atlas). Атлас общий для всех карт с тем же именем ландшафта.', { mpr: MPR, tile: S.int('Код тайла atlas*64+index, который заменить'), png_path: S.str('PNG, лучше бесшовный; масштабируется до 48×48'), from_mpr: S.str('Или взять тайл из атласа другого ландшафта (например вода из zone5_1)…'), from_tile: S.int('…его код atlas*64+index'), type: S.str('Тип земли: grass, ground, stone, sand, rock, road, swamp… (необязательно)'), atlas: S.int('Заменить весь атлас N (0…7) атласом from_atlas ландшафта from_mpr — побайтно, с типами тайлов'), from_atlas: S.int('Номер атласа-источника (по умолчанию = atlas)') }, ['mpr'], async a => {
   let atlasName;
   const out = await editMpr(a, map => {
+  if (a.atlas !== undefined) { // whole atlas: raw bytes (no re-encoding) and the 64 tile types
+    if (!(a.atlas >= 0 && a.atlas < map.textures)) fail(`atlas 0…${map.textures - 1}`);
+    const fm = loadMap(mapRel(a.from_mpr ?? fail('Для atlas нужен from_mpr'), 'mpr')) || fail('Нет ландшафта ' + a.from_mpr), fa = a.from_atlas ?? a.atlas;
+    if (!(fa >= 0 && fa < fm.textures)) fail(`from_atlas 0…${fm.textures - 1}`);
+    atlasName = `${map.name}${String(a.atlas).padStart(3, '0')}.mmp`;
+    resUpdate('Res/textures.res', [{ name: atlasName, data: resEntry('Res/textures.res', `${fm.name}${String(fa).padStart(3, '0')}.mmp`) }]);
+    for (let i = 0; i < 64; i++) map.tileTypes[a.atlas * 64 + i] = fm.tileTypes[fa * 64 + i];
+    return [0, 0, 0, 0];
+  }
   if (!(a.tile >= 0 && a.tile < map.textures * 64)) fail(`tile 0…${map.textures * 64 - 1}`);
   atlasName = `${map.name}${String(a.tile >> 6).padStart(3, '0')}.mmp`;
   const atlas = decodeMmp(resEntry('Res/textures.res', atlasName));
@@ -929,7 +979,7 @@ tool('terrain_tile_import', 'Своя текстура земли: PNG клад�
   // 64x64 cell: 48x48 picture in the middle, 8 px border repeats the picture's opposite edge (seamless wrap)
   const ox = (local & 7) * 64, oy = (7 - (local >> 3)) * 64;
   for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) { const sx = (x - 8 + 48) % 48, sy = (y - 8 + 48) % 48; atlas.rgba.set(cell.subarray((sy * 48 + sx) * 4, (sy * 48 + sx) * 4 + 4), ((oy + y) * 512 + ox + x) * 4); }
-  resUpdate('Res/textures.res', [{ name: atlasName, data: encodeMmpArgb8(512, 512, atlas.rgba) }]);
+  resUpdate('Res/textures.res', [{ name: atlasName, data: encodeMmpDxt1(512, 512, atlas.rgba, 5) }]); // as the game's atlases
   if (a.type === undefined) return null;
   const t = TYPE_EN.indexOf(a.type) >= 0 ? TYPE_EN.indexOf(a.type) : TILE_TYPES.indexOf(a.type);
   if (t < 0) fail('type: ' + TYPE_EN.join(', '));

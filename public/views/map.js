@@ -6,7 +6,7 @@ import { api, h, guard, toast, dirty } from '/app.js';
 import * as M from '/formats/mob.js';
 import { readMpr, writeMpr, updateNormals, markDirty, heightAt } from '/formats/mpr.js';
 import { units } from '/lib/gamedb.js';
-import { gameCatalog as buildCatalog, setupUnit, setupObject } from '/shared/catalog.js';
+import { gameCatalog as buildCatalog, setupUnit, setupObject, unitTemplate } from '/shared/catalog.js';
 import { buildModel, buildTerrain, updateTerrain, retileTerrain, buildWater, loadAtlases, loadModelData } from '/lib/eiscene.js';
 import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRect } from '/formats/aigraph.js';
 
@@ -571,9 +571,9 @@ export async function mount(root, [mobArg, mprArg]) {
     if (!template) return toast('Не нашлось ни одного существа ни на одной карте игры', 'err');
     pickDialog('Добавить существо', 'Поиск по названию: гоблин, орк, Human…',
       unitInfo.prototypes.map(u => ({ title: u.title || u.name, sub: [u.title ? u.name : null, u.kind, u.model].filter(Boolean).join(' · '), value: u })), place);
-    function place(u) {
-      const t = controls.target;
-      insertClone(template, (c, id) => setupUnit(c, u, id, [t.x, t.y, 0]));
+    async function place(u) {
+      const t = controls.target, own = unitTemplate(await gameCatalog(mobs), u);
+      insertClone({ ...template, node: own || template.node }, (c, id) => setupUnit(c, u, id, [t.x, t.y, 0]));
       toast(`Добавлено: ${u.title || u.name}. Оно стоит в центре экрана — передвиньте его.`);
     }
   }

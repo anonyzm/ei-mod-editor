@@ -66,13 +66,13 @@ function pnt3(src, w, h, out) {
   }
 }
 
-// Encode RGBA into an uncompressed ARGB8 MMP with a full mip chain (engine accepts 0x8888).
-export function encodeMmpArgb8(width, height, rgba) {
+// Box-filtered mip chain, `count` levels (default: down to 1x1).
+function mipChain(width, height, rgba, count = Infinity) {
   const levels = [];
   let w = width, h = height, cur = rgba;
   for (;;) {
     levels.push({ w, h, px: cur });
-    if (w === 1 && h === 1) break;
+    if ((w === 1 && h === 1) || levels.length >= count) break;
     const nw = Math.max(1, w >> 1), nh = Math.max(1, h >> 1), nx = new Uint8ClampedArray(nw * nh * 4);
     for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) for (let c = 0; c < 4; c++) {
       let s = 0, k = 0;
@@ -81,6 +81,13 @@ export function encodeMmpArgb8(width, height, rgba) {
     }
     w = nw; h = nh; cur = nx;
   }
+  return levels;
+}
+
+// Encode RGBA into an uncompressed ARGB8 MMP with a full mip chain (engine accepts 0x8888 for UI and objects,
+// but terrain atlases must stay DXT1 with the original 5 levels: one ARGB8 atlas left the whole landscape undrawn).
+export function encodeMmpArgb8(width, height, rgba) {
+  const levels = mipChain(width, height, rgba);
   const size = 76 + levels.reduce((a, l) => a + l.w * l.h * 4, 0);
   const out = new Uint8Array(size), dv = new DataView(out.buffer);
   out.set([0x4d, 0x4d, 0x50, 0]);
@@ -90,5 +97,31 @@ export function encodeMmpArgb8(width, height, rgba) {
   masks.forEach(([m, s, c], i) => { dv.setUint32(24 + i * 12, m, true); dv.setUint32(28 + i * 12, s, true); dv.setUint32(32 + i * 12, c, true); });
   let p = 76;
   for (const l of levels) for (let i = 0; i < l.w * l.h; i++, p += 4) { out[p] = l.px[i * 4 + 2]; out[p + 1] = l.px[i * 4 + 1]; out[p + 2] = l.px[i * 4]; out[p + 3] = l.px[i * 4 + 3]; }
+  return out;
+}
+
+// Opaque DXT1 MMP, header as in the game's terrain atlases (bpp 4, ARGB1555 masks). Endpoints = per-block
+// colour bounding box, always 4-colour mode (c0 > c1); good enough for terrain, not for sharp art.
+export function encodeMmpDxt1(width, height, rgba, mips = Infinity) {
+  const levels = mipChain(width, height, rgba, mips);
+  const out = new Uint8Array(76 + levels.reduce((a, l) => a + Math.max(1, l.w >> 2) * Math.max(1, l.h >> 2) * 8, 0)), dv = new DataView(out.buffer);
+  out.set([0x4d, 0x4d, 0x50, 0]);
+  dv.setUint32(4, width, true); dv.setUint32(8, height, true); dv.setUint32(12, levels.length, true); dv.setUint32(16, FMT.DXT1, true); dv.setUint32(20, 4, true);
+  [[0x8000, 15, 1], [0x7c00, 10, 5], [0x3e0, 5, 5], [0x1f, 0, 5]].forEach(([m, s, c], i) => { dv.setUint32(24 + i * 12, m, true); dv.setUint32(28 + i * 12, s, true); dv.setUint32(32 + i * 12, c, true); });
+  const to565 = c => ((c[0] * 31 / 255 + 0.5) << 11) | ((c[1] * 63 / 255 + 0.5) << 5) | (c[2] * 31 / 255 + 0.5);
+  let p = 76;
+  for (const { w, h, px } of levels) for (let by = 0; by < Math.max(1, h >> 2); by++) for (let bx = 0; bx < Math.max(1, w >> 2); bx++, p += 8) {
+    const blk = [];
+    for (let i = 0; i < 16; i++) { const x = Math.min(w - 1, bx * 4 + (i & 3)), y = Math.min(h - 1, by * 4 + (i >> 2)), o = (y * w + x) * 4; blk.push([px[o], px[o + 1], px[o + 2]]); }
+    const lo = [0, 1, 2].map(k => Math.min(...blk.map(c => c[k]))), hi = [0, 1, 2].map(k => Math.max(...blk.map(c => c[k])));
+    let c0 = to565(hi), c1 = to565(lo);
+    if (c0 < c1) [c0, c1] = [c1, c0];
+    dv.setUint16(p, c0, true); dv.setUint16(p + 2, c1, true);
+    if (c0 === c1) continue; // indices 0: the whole block is c0
+    const p0 = rgb565(c0), p1 = rgb565(c1), pal = [p0, p1, p0.map((v, i) => (2 * v + p1[i]) / 3), p0.map((v, i) => (v + 2 * p1[i]) / 3)];
+    let bits = 0;
+    blk.forEach((c, i) => { let best = 0, bd = Infinity; pal.forEach((q, k) => { const d = (c[0] - q[0]) ** 2 + (c[1] - q[1]) ** 2 + (c[2] - q[2]) ** 2; if (d < bd) { bd = d; best = k; } }); bits |= best << (i * 2); });
+    dv.setUint32(p + 4, bits >>> 0, true);
+  }
   return out;
 }

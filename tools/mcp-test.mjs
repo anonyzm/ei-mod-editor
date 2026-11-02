@@ -8,6 +8,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { GAME } from '../src/game.js';
 import { readSav } from '../src/formats/sav.js';
+import * as M from '../src/formats/mob.js';
+import { readMpr } from '../src/formats/mpr.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url)), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ei-mcp-'));
 const game = path.join(tmp, 'game');
@@ -61,6 +63,14 @@ try {
     await call('db_record_delete', { file: 'items.idb', table: 2, record: 'mcp_test_weapon' });
     return `${name}: Price ${price.text} → 777`;
   });
+  await check('database: repeated sub-fields (acks phrases)', async () => {
+    await call('db_record_add', { file: 'acks.db', table: 1, from: 'Elder', name: 'mcp_test_acks' });
+    const sc = async () => (await call('db_record_get', { file: 'acks.db', table: 1, record: 'mcp_test_acks' })).fields.find(f => f.name === 'Scenario').sub;
+    const first = (await sc())[0].text;
+    await call('db_record_set', { file: 'acks.db', table: 1, record: 'mcp_test_acks', fields: { 'Scenario.field1#1': first.replace('s50', 's51') } });
+    const two = await sc(); assert.equal(two.length, 2, 'appended'); assert.ok(two[1].text.endsWith('s51') && two[0].text.endsWith('s50'));
+    await call('db_record_set', { file: 'acks.db', table: 1, record: 'mcp_test_acks', fields: { 'Scenario.field1#3': 'x' } }, { error: true });
+  });
   await check('units_list', async () => { const u = await call('units_list', { query: 'goblin' }); assert.ok(u.total > 0); return u.units[0].name; });
 
   // a fresh zone, then everything on it
@@ -74,7 +84,7 @@ try {
       const s = await call('map_script_get', { mob }), w = s.slice(s.lastIndexOf('WorldScript'));
       assert.match(w, /^WorldScript\s*\(\s*Sleep\(/, mob); assert.doesNotMatch(w, /GSSetVar/, mob);
     }
-    assert.match(await call('map_script_get', { mob: 'zone1' }), /Script VTriger#0#mcptest[\s\S]*GSSetVar\( 0, "z\.gz1g_mcptest", 1 \)/);
+    assert.match(await call('map_script_get', { mob: 'zone1' }), /Script VTriger#0#mcptest[\s\S]*GSSetVar\( 0, "z\.gz1g_mcptest", 0 \)/);
   });
   await check('terrain sculpt/heights/paint', async () => {
     const info = await call('terrain_info', { mpr: 'mcptest' }); assert.deepEqual(info.size_m, [128, 128]);
@@ -134,11 +144,36 @@ try {
     await call('map_object_get', { mob: 'zone1', id: copy.id }, { error: true });
     assert.equal((await call('map_objects', { mob: 'mcptest', near: [70, 72, 1] })).total, 1);
   });
+  await check('unit template, cross-map copy, batch delete, diplomacy', async () => {
+    // a human cloned from an original human: body parts and its own second texture (a goblin template rendered checkered)
+    const human = M.listObjects(M.readMob(new Uint8Array(fs.readFileSync(path.join(game, 'Maps', 'mcptest.mob'))))).find(o => M.getField(o.node, M.UNIT.unitPrototype) === 'Human Gipath Runner Male F1');
+    assert.ok(M.getField(human.node, M.UNIT.bodyParts).length > 5, 'body parts'); assert.equal(M.getField(human.node, M.OBJ.texture2), 'default0');
+    const chest = await call('map_object_add', { mob: 'mcptest', copy_of: 2198, from_mob: 'zone9', fields: { pos: [40, 40] } });
+    assert.equal(chest.kind, 'trap'); assert.equal(chest.prototype, 'Chest00'); assert.deepEqual(chest.pos.slice(0, 2), [40, 40]);
+    const b = await call('map_object_add', { mob: 'mcptest', items: [{ object: 'FirTree00', fields: { pos: [10, 50] } }, { object: 'FirTree00', fields: { pos: [14, 50] } }] });
+    assert.equal((await call('map_object_delete', { mob: 'mcptest', ids: b.ids })).deleted, 2);
+    assert.equal((await call('map_objects', { mob: 'mcptest', near: [12, 50, 3] })).total, 0);
+    const d = await call('map_diplomacy', { mob: 'mcptest', players: 4, set: [{ a: 0, b: 2, value: 'enemy' }] });
+    assert.equal(d.matrix[0].split(' ')[2], 'enemy'); assert.equal(d.matrix[2].split(' ')[0], 'enemy');
+    assert.equal((await call('map_diplomacy', { mob: 'mcptest', players: 3 })).matrix[0].split(' ')[2], 'enemy', 'saved');
+    await call('map_diplomacy', { mob: 'mcptest', set: [{ a: 1, b: 1, value: 'ally' }] }, { error: true });
+  });
+  await check('atlas copy, autotile exclude, swamp', async () => {
+    await call('terrain_tile_import', { mpr: 'mcptest', atlas: 0, from_mpr: 'zone3obr' });
+    const info = await call('terrain_info', { mpr: 'mcptest' }), grass = info.tiles_by_type['0 трава (grass)'].filter(t => t < 64);
+    assert.ok(info.tiles_by_type['14 болото (swamp)']?.includes(9), 'zone3obr atlas 0 types came along');
+    const banned = grass.slice(3);
+    await call('terrain_autotile', { mpr: 'mcptest', classes: { grass: grass.slice(0, 3), stone: [0, 1] }, ops: [{ x0: 0, y0: 0, x1: 128, y1: 128, class: 'grass' }, { x: 64, y: 64, radius: 12, class: 'stone' }], exclude: banned });
+    const tiles = readMpr(new Uint8Array(fs.readFileSync(path.join(game, 'Maps', 'mcptest.mpr')))).tiles;
+    assert.ok(!tiles.some(t => banned.includes(t & 0x3fff)), 'excluded tiles never used');
+    await call('terrain_water', { mpr: 'mcptest', ops: [{ x0: 0, y0: 0, x1: 128, y1: 128, level: 3, material: 'swamp', tile: 9 }] });
+    assert.ok((await call('terrain_info', { mpr: 'mcptest' })).water_tiles > 0, 'swamp liquid');
+  });
   await check('map script', async () => {
     const s = await call('map_script_get', { mob: 'mcptest' }); assert.ok(s.includes('WorldScript'));
     await call('map_script_set', { mob: 'mcptest', script: s.replace('Sleep( 1 )', 'Sleep( 2 )') });
     assert.ok((await call('map_script_get', { mob: 'mcptest' })).includes('Sleep( 2 )'));
-    assert.ok((await call('map_script_get', { mob: 'zone1' })).includes('GSSetVar( 0, "z.gz1g_mcptest", 1 )'), 'exit opened in linked zone (edges: 0 closed, 1 open)');
+    assert.ok((await call('map_script_get', { mob: 'zone1' })).includes('GSSetVar( 0, "z.gz1g_mcptest", 0 )'), 'exit opened in linked zone (edges: 1 closed, 0 or unset open)');
   });
   if (saveSlot) await check('save games: list, variables', async () => {
     const l = await call('saves_list'); assert.ok(l.some(s => s.save === saveSlot && s.zone), JSON.stringify(l));

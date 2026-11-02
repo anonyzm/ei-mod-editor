@@ -190,8 +190,17 @@ export function cloneChunk(c) {
   return c.children ? { id: c.id, children: c.children.map(cloneChunk) } : c.tail ? { id: -1, tail: c.tail.slice() } : { id: c.id, data: c.data.slice() };
 }
 
+// A base (brief zone) finds who offers briefing b.<name>.<id> by object id, not by name: game.exe 0x461360
+// hashes the name as h = h*5 + toupper(c) (u32) and takes h % 1e9 + 1e9 (Elder 1000054752, OLiz 1000012230).
+export function briefingUnitId(name) {
+  let h = 0;
+  for (const b of cp1251.encode(name)) h = (h * 5 + (b >= 0x61 && b <= 0x7a ? b - 32 : b)) >>> 0;
+  return h % 1e9 + 1e9;
+}
+
 export function maxObjectId(mob) {
   let m = 0;
-  walk(mob.chunks, c => { if (c.id === 0xb002) m = Math.max(m, codec.u32.get(c.data)); });
+  // ids from 1e9 up are name hashes of base NPCs (briefingUnitId), not part of the running numbering
+  walk(mob.chunks, c => { if (c.id === 0xb002) { const v = codec.u32.get(c.data); if (v < 1e9) m = Math.max(m, v); } });
   return m;
 }
