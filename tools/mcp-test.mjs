@@ -82,11 +82,14 @@ try {
     assert.deepEqual(await call('spell_behaviour', { code: 'mcp_frost' }), { mcp_frost: { like: 'arrow', damage: 'piercing', drain: '0.5', effect: 'slow' } });
     assert.equal((await call('texts_get', { names: ['SPELL mcp_frost'] }))['SPELL mcp_frost'], 'Ледяная стрела\nКолет и замедляет.\n');
     await call('spell_create', { code: 'mcp_frost', behaviour: { like: 'arrow' } }, { error: true });
-    await call('spell_create', { code: 'bad_one', behaviour: { like: 'mcp_frost' } }, { error: true });
+    await call('spell_create', { code: 'bad_one', behaviour: { like: 'no_such_spell' } }, { error: true });
+    await call('spell_create', { code: 'bad_two', behaviour: { like: 'arrow', effect: 'fireball' } }, { error: true }); // effect is an engine status
     await call('spell_create', { code: 'bad_two', behaviour: { like: 'arrow', damage: 'cold' } }, { error: true });
     assert.equal((await codes()).length, after.length, 'a refused spell writes nothing');
     await call('spell_behaviour', { code: 'fireball', behaviour: { damage: 'acid' } });
-    await call('spell_behaviour', { code: 'arrow', behaviour: { damage: 'fire' } }, { error: true }); // mcp_frost is like arrow
+    await call('spell_behaviour', { code: 'arrow', behaviour: { cast: 'flying' } }, { error: true });
+    await call('spell_behaviour', { code: 'arrow', behaviour: { damage: 'acid' } }); // a game spell changed by data, after mcp_frost copied it
+    await call('spell_behaviour', { code: 'arrow', behaviour: null });
     await call('spell_behaviour', { code: 'fireball', behaviour: null });
     assert.deepEqual(Object.keys(await call('spell_behaviour')), ['mcp_frost']);
     // the sellers: arrow's shops were copied; keep shop 2 only and sell ready spells there too

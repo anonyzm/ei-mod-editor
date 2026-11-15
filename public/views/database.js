@@ -5,7 +5,7 @@ import { dbForFile, readDatabase, writeDatabase, fieldView, textToField } from '
 import { schema, recordInfo } from '/lib/gamedb.js';
 import { buildModel, loadFigModel, textureDataUrl, createPreview } from '/lib/eiscene.js';
 import { cp1251 } from '/formats/bytes.js';
-import { NEWSPELLS, GAME_SPELLS, DAMAGE, parseSpellDo, checkSpellDo, formatSpellDo, describeSpellDo } from '/shared/newspells.js';
+import { NEWSPELLS, GAME_SPELLS, DAMAGE, CASTS, STATUSES, parseSpellDo, checkSpellDo, formatSpellDo, describeSpellDo } from '/shared/newspells.js';
 
 // Friendly names, in the order users look for things.
 const TABLES = [
@@ -157,7 +157,7 @@ export async function mount(root, [srcArg]) {
     const row = (title, el, hint) => h('div.f', h('label', title, hint ? h('small', ' — ' + hint) : null), el);
     const d = spellDo[code];
     const status = d ? describeSpellDo(d, names)
-      : idx < GAME_SPELLS ? `Как в оригинальной игре: поведение заклинания №${idx} зашито в game.exe и New EI по номеру.`
+      : idx < GAME_SPELLS ? `Как в оригинальной игре: описание в New EI/ei/spells.ini (данные, не код движка). Здесь его можно изменить для мода.`
         : `Поведение не задано — в New EI заклинание №${idx} ничего не делает. Выберите «Как летит» и что оно делает с целью.`;
     async function write(all) {
       if (st.changed.has('spells.sdb')) return toast('Сначала сохраните базу («Сохранить в игру»): поведение проверяется по сохранённым заклинаниям', 'err');
@@ -180,13 +180,14 @@ export async function mount(root, [srcArg]) {
       h('div.muted', status),
       h('details', { open: !d && idx >= GAME_SPELLS },
         h('summary', d ? 'Изменить' : 'Задать поведение'),
-        row('Как летит и кого задевает', sel('like', codes.slice(0, GAME_SPELLS), idx < GAME_SPELLS ? '— своё (как в игре)' : '— выберите —'), 'полёт, цели и вид — как у этого заклинания игры'),
+        row('Сделать из', sel('like', codes.filter((c, i) => c !== code && (i < GAME_SPELLS || spellDo[c])), idx < GAME_SPELLS ? '— своё (как в игре)' : '— выберите —'), 'копируется всё описание: полёт, частицы, звуки; поля ниже его меняют'),
+        row('Как летит и кого задевает', h('select', { onchange: e => { draft.cast = e.target.value; } }, [h('option', { value: '' }, '— как у «Сделать из» —'), ...Object.entries(CASTS).map(([k, v]) => h('option', { value: k, selected: k === draft.cast }, `${v} (${k})`))])),
         row('Урон', h('select', { onchange: e => { draft.damage = e.target.value; } }, [h('option', { value: '' }, '— нет —'), ...DAMAGE.map(x => h('option', { value: x, selected: x === draft.damage }, x))]), 'силой поля Effect'),
         row('Лечит цель', h('input', { type: 'checkbox', checked: !!+draft.heal, onchange: e => { draft.heal = e.target.checked ? 1 : ''; } }), 'на Effect'),
         row('Вампиризм', num('drain', '0.5'), 'доля нанесённого урона, которая лечит заклинателя'),
-        row('Эффект на цель', sel('effect', codes, '— нет —'), 'как у этого заклинания: замедление (slow), оглушение (stun), ускорение (speed)…'),
-        row('Сила эффекта', num('effect_power', 'Effect заклинания')),
-        row('Длительность эффекта, тактов', num('effect_ticks', 'Duration заклинания'), '1 такт = 0,055 с'),
+        row('Состояние на цели', h('select', { onchange: e => { draft.effect = e.target.value; } }, [h('option', { value: '' }, '— нет —'), ...Object.entries(STATUSES).map(([k, v]) => h('option', { value: k, selected: k === draft.effect }, `${v} (${k})`))]), 'состояния — механики движка'),
+        row('Сила состояния', num('effect_power', 'Effect заклинания')),
+        row('Длительность состояния, тактов', num('effect_ticks', 'Duration заклинания'), '1 такт = 0,055 с'),
         row('Звуки', sel('sound', codes, '— как у «Как летит» —')),
         h('div.row', h('button.primary', { onclick: save }, 'Сохранить поведение'), d ? h('button.danger', { onclick: drop }, 'Убрать') : null)));
   }

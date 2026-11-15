@@ -20,7 +20,7 @@ import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRe
 import { loadWorld, saveWorld, createZone, directive, exitsOf, ISLAND } from './src/shared/world.js';
 import { gameCatalog, setupUnit, setupObject, raceTexture, unitStandsHome, unitTemplate } from './src/shared/catalog.js';
 import { encodePng, decodePng, resizeRgba } from './src/png.js';
-import { NEWSPELLS, GAME_SPELLS, DAMAGE, DO_KEYS, parseSpellDo, checkSpellDo, formatSpellDo } from './src/shared/newspells.js';
+import { NEWSPELLS, GAME_SPELLS, DAMAGE, CASTS, STATUSES, AI, DO_KEYS, parseSpellDo, checkSpellDo, formatSpellDo } from './src/shared/newspells.js';
 
 // ---------------- game access ----------------
 const modelCache = new Map();
@@ -487,16 +487,21 @@ function writeSpellDo(all) {
 }
 const doOf = b => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, typeof v === 'boolean' ? +v : v]));
 const DO_PROPS = {
-  like: S.str('Код заклинания игры (номер 0…41): как новое летит и кого задевает — arrow, lightning, fireball, inv_lit, acid_column, firewall, acid_fog, healing, slow, teleport…'),
+  like: S.str('Заклинание, с которого начать (игры или уже описанное в файле): копируется всё его описание — как летит, частицы, звуки; ключи ниже его меняют'),
+  cast: { type: 'string', enum: Object.keys(CASTS), description: 'Как летит и кого задевает: ' + Object.entries(CASTS).map(([k, v]) => `${k} — ${v}`).join('; ') },
   damage: { type: 'string', enum: DAMAGE, description: 'Урон каждой цели силой Effect' },
   heal: S.bool('Лечить цель на Effect'),
   drain: S.num('Доля нанесённого урона, которая лечит заклинателя (0.5 — половина)'),
-  effect: S.str('Код заклинания, чей эффект кладётся на цель (slow, stun, speed, strength, weak, invisibility…)'),
-  effect_power: S.num('Сила эффекта (по умолчанию Effect заклинания)'),
-  effect_ticks: S.int('Длительность эффекта в тактах по 55 мс (по умолчанию Duration)'),
-  sound: S.str('Чьи звуки играть (по умолчанию like)'),
+  effect: { type: 'string', enum: Object.keys(STATUSES), description: 'Состояние движка на цели: ' + Object.entries(STATUSES).map(([k, v]) => `${k} — ${v}`).join(', ') },
+  effect_power: S.num('Сила состояния (по умолчанию Effect заклинания)'),
+  effect_ticks: S.int('Длительность состояния в тактах по 55 мс (по умолчанию Duration)'),
+  fx: S.str('Частицы полёта (missile, ball), номер типа, например 0x2011'), blast: S.str('Частицы взрыва шара'),
+  hit_fx: S.str('Частицы на задетом существе'), hit_size: S.num('Их размер относительно частиц заклинания'),
+  ai: { type: 'string', enum: AI, description: 'Как его видит ИИ (по умолчанию — по тому, что оно делает)' },
+  offensive: S.bool('Быстрый каст направляет во врага'), hostile: S.bool('Задетый становится врагом заклинателя'),
+  sound: S.str('Папка звуков sfx.res magic\\… или код заклинания, чьи звуки взять'),
 };
-tool('spell_behaviour', 'Поведение заклинаний для New EI (файл Config/newspells.ini; game.exe его не читает). Без behaviour — показать разделы. С behaviour — заменить раздел code; null — удалить раздел. Можно переделать и заклинание игры: [fireball] damage = acid.', { code: S.str('Code заклинания из spells.sdb'), behaviour: { type: ['object', 'null'], description: 'Ключи: ' + DO_KEYS.join(', '), properties: DO_PROPS } }, [], a => {
+tool('spell_behaviour', 'Поведение заклинаний для New EI (файл Config/newspells.ini; game.exe его не читает). Заклинания игры описаны так же (New EI/ei/spells.ini) — в движке нет ни одного заклинания, только способы доставки, урон, лечение, состояния. Без behaviour — показать разделы. С behaviour — заменить раздел code; null — удалить раздел. Можно переделать и заклинание игры: [fireball] damage = acid.', { code: S.str('Code заклинания из spells.sdb'), behaviour: { type: ['object', 'null'], description: 'Ключи: ' + DO_KEYS.join(', '), properties: DO_PROPS } }, [], a => {
   const all = readSpellDo();
   if (a.behaviour === undefined) return a.code ? { [a.code]: all[a.code.toLowerCase()] ?? null } : all;
   const code = String(a.code || fail('Нужен code')).toLowerCase();
@@ -514,7 +519,7 @@ tool('spell_create', 'Новое заклинание для New EI: запис�
   if (!/^[a-z][a-z0-9_]*$/.test(code)) fail('code — латиница, цифры и _');
   if (codes.includes(code)) fail(`Заклинание ${code} уже есть (номер ${codes.indexOf(code)}); поведение меняйте через spell_behaviour`);
   const li = codes.indexOf(String(a.behaviour.like).toLowerCase());
-  if (li < 0 || li >= GAME_SPELLS) fail(`like = ${a.behaviour.like} — нужно заклинание игры (номер 0…41)`);
+  if (li < 0 || li >= GAME_SPELLS && !readSpellDo()[codes[li]]) fail(`like = ${a.behaviour.like} — нужно описанное заклинание (игры или из newspells.ini)`);
   const all = readSpellDo();
   all[code] = doOf(a.behaviour);
   checkSpellDo(all, [...codes, code]); // before anything is written
