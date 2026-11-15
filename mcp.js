@@ -21,6 +21,7 @@ import { loadWorld, saveWorld, createZone, directive, exitsOf, ISLAND } from './
 import { gameCatalog, setupUnit, setupObject, raceTexture, unitStandsHome, unitTemplate } from './src/shared/catalog.js';
 import { encodePng, decodePng, resizeRgba } from './src/png.js';
 import { NEWSPELLS, GAME_SPELLS, DAMAGE, CASTS, STATUSES, AI, DO_KEYS, parseSpellDo, checkSpellDo, formatSpellDo } from './src/shared/newspells.js';
+import { NEWSCHOOLS, allSchools, parseSchools, formatSchools, checkSchools, addSchool } from './src/shared/schools.js';
 
 // ---------------- game access ----------------
 const modelCache = new Map();
@@ -514,6 +515,7 @@ tool('spell_create', 'Новое заклинание для New EI: запис�
   fields: S.obj('Поля записи как в db_record_set: Mana, Range, Area, Effect, Duration, Speed, Price, Targets, "Shop 1"…', { additionalProperties: { type: ['string', 'number'] } }),
   behaviour: { type: 'object', description: 'Что делает заклинание (см. spell_behaviour); like обязателен', properties: DO_PROPS, required: ['like'] },
   icon_png: S.str('Абсолютный путь к PNG иконки (необязательно)'),
+  school: S.str('Школа магии (schools; по умолчанию — школа like)'),
 }, ['code', 'behaviour'], a => {
   const code = String(a.code).trim().toLowerCase(), codes = spellCodes();
   if (!/^[a-z][a-z0-9_]*$/.test(code)) fail('code — латиница, цифры и _');
@@ -526,7 +528,8 @@ tool('spell_create', 'Новое заклинание для New EI: запис�
   const D = loadDb('sp'), { f, t, db } = dbTable(D, 'spells.sdb', 1), copy = structuredClone(t.records[li]);
   const name = a.name || code.replace(/(^|_)(\w)/g, (_, s, c) => (s ? ' ' : '') + c.toUpperCase());
   if (t.records.some(r => recName(db, t, r).toLowerCase() === name.toLowerCase())) fail(`Запись «${name}» уже есть`);
-  setFields(db, t, copy, { Name: name, Code: code, ...a.fields });
+  const sc = a.school ? schoolOf(a.school) : null;
+  setFields(db, t, copy, { Name: name, Code: code, ...(sc ? { SubType: sc.code, SubTypeCode: sc.n } : {}), ...a.fields });
   t.records.push(copy);
   const index = t.records.length - 1, icon = `spell${String(index).padStart(4, '0')}.mmp`;
   if (a.icon_png) setFields(db, t, copy, { TTI: index }); // the editor and item pictures find the icon by TTI
@@ -570,6 +573,40 @@ tool('shop_spells', 'Заклинания у продавцов (констру�
   if (a.sell === undefined && a.ready === undefined) fail('Укажите sell (+ shop) или ready');
   saveDb(D, f);
   return view();
+});
+
+// ---- New EI schools of magic: Config/newschools.ini + their skill and perks in perks.pdb ----
+const readSchoolsIni = () => exists(NEWSCHOOLS) ? parseSchools(cp1251.decode(readGameFile(NEWSCHOOLS))) : {};
+const schoolOf = code => allSchools(readSchoolsIni()).find(s => s.code === String(code).toLowerCase()) || fail(`Нет школы ${code}. Есть: ${allSchools(readSchoolsIni()).map(s => s.code).join(', ')}`);
+tool('schools', 'Школы магии New EI: номер (поле SubTypeCode заклинаний), навык героя, который её растит (perks.pdb, таблица 1), группа перков (таблица 2), сколько заклинаний в ней. Школы игры описаны в New EI/ei/schools.ini, школы мода — Config/newschools.ini.', {}, [], () => {
+  const D = loadDb('sp'), { t, db } = dbTable(D, 'spells.sdb', 1);
+  const count = new Map();
+  for (const r of t.records) { const f = findField(db, 1, r.children, 'SubTypeCode'); const n = f?.data ? +fieldView(dbType(db, 1, f.id), f.data).text : -1; count.set(n, (count.get(n) || 0) + 1); }
+  return allSchools(readSchoolsIni()).map(s => ({ ...s, source: s.mod ? 'мод' : 'игра', spells: count.get(s.n) || 0 }));
+});
+tool('school_create', 'Новая школа магии для New EI со своей веткой навыков: навык героя (копия навыка школы from в конце perks.pdb, таблица 1) и три перка Ученик/Эксперт/Мастер (копии перков from в конце таблицы 2), описание в Config/newschools.ini, тексты для лагеря ("PERK <code>" — навык, "PERK <code>0" — перки, "PERK <code>1…3" — уровни). Возвращает номер школы n — его ставят заклинаниям в SubTypeCode (spell_school или spell_create school). Оригинальный game.exe лишних навыков и перков не знает.', {
+  code: S.str('Код школы латиницей (ice)'), title: S.str('Название навыка в лагере («Магия льда»)'), description: S.str('Описание навыка'),
+  perk_titles: S.arr('Названия трёх уровней перков (по умолчанию Ученик, Эксперт, Мастер)', { type: 'string' }),
+  from: S.str('Школа, чьи навык и перки скопировать (цены, бонусы, атрибут), по умолчанию fire'),
+}, ['code', 'title'], a => {
+  const mod = readSchoolsIni(), D = loadDb('sp'), f = D.files.get('perks.pdb') || fail('Нет perks.pdb');
+  const { section, skillIndex, group } = addSchool(f, mod, { code: a.code, from: a.from || 'fire' });
+  const code = String(a.code).trim().toLowerCase(), all = { ...mod, [code]: section };
+  checkSchools(all, f);
+  saveDb(D, f);
+  saveGameFile(NEWSCHOOLS, cp1251.encode(formatSchools(all)));
+  const lv = a.perk_titles?.length === 3 ? a.perk_titles : ['Ученик', 'Эксперт', 'Мастер'];
+  const text = (...l) => cp1251.encode(l.join('\r\n') + '\r\n');
+  resUpdate(srcOf('sp')[1], [{ name: `PERK ${code}`, data: text(a.title, a.description || '') }, { name: `PERK ${code}0`, data: text(a.title, a.description || '') },
+    ...lv.map((t, i) => ({ name: `PERK ${code}${i + 1}`, data: text(t, t + '.') }))]);
+  return { school: code, n: section.n, skill: `perks.pdb таблица 1, №${skillIndex}`, perks: `perks.pdb таблица 2, группа ${group} (${code}1…${code}3)`, next: `заклинаниям школы — SubType ${code}, SubTypeCode ${section.n} (spell_school)` };
+});
+tool('spell_school', 'Перевести заклинание в школу магии (поля SubType и SubTypeCode записи spells.sdb): от школы зависит, какой навык героя нужен, чтобы его выучить и сотворить.', { spell: S.str('Code или имя заклинания'), school: S.str('Код школы (schools)') }, ['spell', 'school'], a => {
+  const sc = schoolOf(a.school), D = loadDb('sp'), { f, t, db } = dbTable(D, 'spells.sdb', 1);
+  const rec = t.records.find(r => [recName(db, t, r), fieldView(dbType(db, 1, 1), findField(db, 1, r.children, 'Code').data).text].some(x => x.toLowerCase() === String(a.spell).toLowerCase())) || fail(`Нет заклинания ${a.spell}`);
+  const changed = setFields(db, t, rec, { SubType: sc.code, SubTypeCode: sc.n });
+  saveDb(D, f);
+  return { spell: recName(db, t, rec), changed };
 });
 
 tool('units_list', 'Прототипы существ из базы (монстры и НПС) с моделью и текстурой их расы — для map_object_add.', { query: S.str('Подстрока имени'), limit: S.int('По умолчанию 100') }, [], a => {

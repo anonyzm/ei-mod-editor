@@ -104,6 +104,27 @@ try {
     assert.ok(v[2].spells.includes('mcp_frost (только основа)'));
     return `mcp_frost = №${s.index}`;
   });
+  await check('schools: school_create / spell_school (New EI)', async () => {
+    assert.equal((await call('schools')).length, 8);
+    const n1 = (await call('db_records', { file: 'perks.pdb', table: 1 })).total, n2 = (await call('db_records', { file: 'perks.pdb', table: 2, limit: 500 })).total;
+    const s = await call('school_create', { code: 'mcp_ice', title: 'Магия льда', description: 'Холод.' });
+    assert.equal(s.n, 8);
+    const skills = (await call('db_records', { file: 'perks.pdb', table: 1 })).records, perks = (await call('db_records', { file: 'perks.pdb', table: 2, limit: 500 })).records;
+    assert.equal(skills.length, n1 + 1); assert.equal(skills.at(-1)[2], 'mcp_ice');
+    assert.equal(perks.length, n2 + 3); assert.deepEqual(perks.slice(-3).map(r => r[2]), ['mcp_ice1', 'mcp_ice2', 'mcp_ice3']);
+    const ice3 = (await call('db_record_get', { file: 'perks.pdb', table: 2, record: n2 + 2 })).fields;
+    assert.equal(ice3.find(f => f.name === 'Perk').text, 'mcp_ice2'); assert.equal(ice3.find(f => f.name === 'Skill').text, 'mcp_ice'); assert.equal(ice3.find(f => f.name === 'SkillID').text, String(n1));
+    assert.equal((await call('texts_get', { names: ['PERK mcp_ice0'] }))['PERK mcp_ice0'], 'Магия льда\nХолод.\n');
+    const list = await call('schools');
+    assert.ok(list.some(x => x.code === 'mcp_ice' && x.n === 8 && x.source === 'мод'));
+    await call('school_create', { code: 'mcp_ice', title: 'x' }, { error: true });
+    await call('school_create', { code: 'mcp_x', title: 'x', from: 'nope' }, { error: true });
+    const r = await call('spell_school', { spell: 'arrow', school: 'mcp_ice' });
+    assert.equal(r.changed.SubTypeCode, '8');
+    await call('spell_school', { spell: 'arrow', school: 'fire' });
+    await call('spell_school', { spell: 'arrow', school: 'nope' }, { error: true });
+    return `mcp_ice = школа ${s.n}, ${s.perks}`;
+  });
   await check('units_list', async () => { const u = await call('units_list', { query: 'goblin' }); assert.ok(u.total > 0); return u.units[0].name; });
 
   // a fresh zone, then everything on it

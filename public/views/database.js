@@ -6,6 +6,7 @@ import { schema, recordInfo } from '/lib/gamedb.js';
 import { buildModel, loadFigModel, textureDataUrl, createPreview } from '/lib/eiscene.js';
 import { cp1251 } from '/formats/bytes.js';
 import { NEWSPELLS, GAME_SPELLS, DAMAGE, CASTS, STATUSES, parseSpellDo, checkSpellDo, formatSpellDo, describeSpellDo } from '/shared/newspells.js';
+import { NEWSCHOOLS, allSchools, parseSchools, formatSchools, checkSchools, addSchool } from '/shared/schools.js';
 
 // Friendly names, in the order users look for things.
 const TABLES = [
@@ -48,6 +49,8 @@ export async function mount(root, [srcArg]) {
   // New EI's behaviour of spells (Config/newspells.ini, shared by both databases); missing file = none
   let spellDo = {};
   try { spellDo = parseSpellDo(cp1251.decode(await api.file(NEWSPELLS))); } catch { /* no file yet */ }
+  let schoolsMod = {}; // a mod's schools of magic (Config/newschools.ini)
+  try { schoolsMod = parseSchools(cp1251.decode(await api.file(NEWSCHOOLS))); } catch { /* no file yet */ }
   renderTables();
 
   function markChanged() { st.changed.add(st.table.file); saveBtn.disabled = false; dirty.add('database'); }
@@ -144,6 +147,44 @@ export async function mount(root, [srcArg]) {
     if (st.table.file === 'spells.sdb' && bid === 1) right.prepend(behaviourBlock(rec));
   }
 
+  // schoolRow picks the spell's school of magic (fields SubType and SubTypeCode) and makes a new one: its own hero
+  // skill and perks in perks.pdb, Config/newschools.ini, the camp's texts.
+  function schoolRow(rec) {
+    const t = st.table.t, cur = +valOf(t, rec)(19), list = allSchools(schoolsMod);
+    const put = (fid, v) => { const n = fieldNode(rec, fid); n.data = textToField(fieldView(typeOf(t.id, fid), n.data).type, String(v), n.data); };
+    const pick = h('select', { onchange: e => {
+      const sc = list.find(x => x.code === e.target.value);
+      put(2, sc.code); put(19, sc.n); markChanged(); renderRecords(); renderRecord();
+    } }, [...(list.some(x => x.n === cur) ? [] : [h('option', { value: '', selected: true }, `№${cur} — не описана`)]),
+      ...list.map(x => h('option', { value: x.code, selected: x.n === cur }, `${x.code} — №${x.n}, навык ${x.skill}${x.mod ? ' (мод)' : ''}`))]);
+    async function create() {
+      if (st.src !== SOURCES[0][0]) return toast('Школы создаются в одиночной базе', 'err');
+      const code = prompt('Код новой школы латиницей (например ice):');
+      if (!code) return;
+      const title = prompt('Название навыка в лагере:', 'Магия ');
+      if (!title) return;
+      const from = prompt('С какой школы скопировать цены и бонусы навыка и перков:', 'fire') || 'fire';
+      await guard(async () => {
+        const perks = st.files.get('perks.pdb');
+        const { section } = addSchool(perks, schoolsMod, { code, from });
+        const all = { ...schoolsMod, [code.trim().toLowerCase()]: section };
+        checkSchools(all, perks);
+        st.changed.add('perks.pdb');
+        const put = [...st.changed].map(k => { const f = st.files.get(k); return { name: f.name, data: writeDatabase(f.data) }; });
+        await api.resUpdate(st.src, put);
+        st.changed.clear(); saveBtn.disabled = true; dirty.delete('database');
+        await api.saveFile(NEWSCHOOLS, cp1251.encode(formatSchools(all)));
+        const text = (...l) => cp1251.encode(l.join('\r\n') + '\r\n'), c = code.trim().toLowerCase();
+        await api.resUpdate('Res/texts.res', [{ name: `PERK ${c}`, data: text(title, '') }, { name: `PERK ${c}0`, data: text(title, '') },
+          ...['Ученик', 'Эксперт', 'Мастер'].map((n, i) => ({ name: `PERK ${c}${i + 1}`, data: text(n, n + '.') }))]);
+        schoolsMod = all;
+        renderTables(); renderRecord();
+      }, `Школа создана: навык и перки — в конце perks.pdb, номер — в ${NEWSCHOOLS}. Выберите её у заклинания.`);
+    }
+    return h('div.f', h('label', 'Школа магии', h('small', ' — какой навык героя нужен, чтобы выучить и сотворить')),
+      h('div.row', pick, h('button', { onclick: create, title: 'Своя ветка навыков: навык героя и три перка' }, '＋ Новая школа…')));
+  }
+
   // behaviourBlock shows and edits what the spell does in New EI: game.exe knows spells 0…41 by number, New EI reads
   // the rest (and changes to those) from Config/newspells.ini.
   function behaviourBlock(rec) {
@@ -178,6 +219,7 @@ export async function mount(root, [srcArg]) {
     return h('div.form', { style: { border: '1px solid var(--line)', borderRadius: '6px', padding: '8px', marginBottom: '10px' } },
       h('div', h('b', 'Поведение в New EI'), h('small.sub', ` №${idx} · ${NEWSPELLS}`)),
       h('div.muted', status),
+      schoolRow(rec),
       h('details', { open: !d && idx >= GAME_SPELLS },
         h('summary', d ? 'Изменить' : 'Задать поведение'),
         row('Сделать из', sel('like', codes.filter((c, i) => c !== code && (i < GAME_SPELLS || spellDo[c])), idx < GAME_SPELLS ? '— своё (как в игре)' : '— выберите —'), 'копируется всё описание: полёт, частицы, звуки; поля ниже его меняют'),
