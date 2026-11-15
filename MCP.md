@@ -164,8 +164,11 @@ exp:i=150
 | `db_records {file, table, query?, offset?, limit?}` | Записи: `[индекс, имя, …первые поля]`. |
 | `db_record_get {file, table, record}` | Все поля: `id`, `name`, `type`, `text` (значение), `desc`. Вложенные поля — в `sub`. |
 | `db_record_set {file, table, record, fields}` | `fields: {"Price": "500", "D.Min": "4"}`. Ключ — имя или id поля, для вложенного поля `"Поле.Подполе"`. Повторяющиеся подполя (фразы в `acks.db`, списки) — `"Поле.Подполе#N"`: N с 0, N равное числу повторов добавляет новый (копию последнего). Значения передаются текстом в том же виде, в каком их показал `db_record_get`. |
-| `db_record_add {file, table, from, name}` | Новая запись копированием образца. Имя должно быть уникальным. |
-| `db_record_delete {file, table, record}` | Удаление записи. Помните про ссылки на неё. |
+| `db_record_add {file, table, from, name}` | Новая запись копированием образца — в конец таблицы (игра и сейвы ссылаются на записи по номеру). Имя должно быть уникальным. |
+| `db_record_delete {file, table, record}` | Удаление записи. Помните про ссылки на неё и что номера следующих записей сдвинутся. |
+| `spell_create {code, behaviour, title?, description?, fields?, icon_png?}` | Новое заклинание **для New EI**: копия заклинания `behaviour.like` в конец `spells.sdb` с новыми Name/Code и полями `fields`, поведение в `Config/newspells.ini`, текст `SPELL <code>` (название и описание), иконка `spell00NN.mmp` из PNG. Оригинальный game.exe его не понимает. |
+| `spell_behaviour {code?, behaviour?}` | Читает или правит `Config/newspells.ini`: `behaviour` заменяет раздел, `null` удаляет. Ключи: `like` (заклинание игры — как летит и кого задевает), `damage` (piercing, slashing, bludgeoning, fire, acid, lightning, general; сила = Effect), `heal`, `drain` (доля урона заклинателю), `effect` + `effect_power` + `effect_ticks` (эффект другого заклинания на цели: slow, stun, speed…), `sound`. Подробнее — README New EI, «Новые заклинания». |
+| `shop_spells {spell?, shop?, sell?, ready?}` | Заклинания у продавцов (конструкторы 1…5: 1 — только вещи, 2 — только магия, 3–5 — всё). Без `spell` — что продаёт каждая лавка; «(только основа)» — нет готовых заклинаний. `spell` + `shop` + `sell` — продавать ли основу заклинания в лавке (бит поля `Shop 1`). `ready: true` — продавать и готовые (новому заклинанию копируются шаблоны таблицы 3 его `like`), `false` — убрать шаблоны. Лавки пополняются после квестов; New EI добавляет новые заклинания мода и в лавки уже идущей кампании. |
 | `units_list {query?}` | Прототипы существ с моделью расы — для `map_object_add`. |
 
 `record` — индекс (число) или внутреннее имя записи без учёта регистра.

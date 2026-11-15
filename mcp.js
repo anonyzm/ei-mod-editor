@@ -20,6 +20,7 @@ import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRe
 import { loadWorld, saveWorld, createZone, directive, exitsOf, ISLAND } from './src/shared/world.js';
 import { gameCatalog, setupUnit, setupObject, raceTexture, unitStandsHome, unitTemplate } from './src/shared/catalog.js';
 import { encodePng, decodePng, resizeRgba } from './src/png.js';
+import { NEWSPELLS, GAME_SPELLS, DAMAGE, DO_KEYS, parseSpellDo, checkSpellDo, formatSpellDo } from './src/shared/newspells.js';
 
 // ---------------- game access ----------------
 const modelCache = new Map();
@@ -434,8 +435,14 @@ tool('db_record_get', 'Все поля записи: id, имя, тип, зна�
   return { index: t.records.indexOf(rec), name: recName(db, t, rec), fields: recordFields(db, t, rec) };
 });
 tool('db_record_set', 'Изменить поля записи. fields: {"Price": "120", "D.Min": "5"} — ключ это имя или id поля, для вложенных "Поле.Подполе", для повторяющихся "Поле.Подполе#N" (N с 0; N = число повторов — добавить ещё один). Значения — текстом, как их возвращает db_record_get (списки через запятую, BitList строкой 0/1).', { file: S.str(''), table: S.str(''), record: S.str('Индекс или имя'), fields: S.obj('{поле: значение}', { additionalProperties: { type: ['string', 'number'] } }), source: SOURCE }, ['file', 'table', 'record', 'fields'], a => {
-  const D = loadDb(a.source), { f, t, db } = dbTable(D, a.file, a.table), rec = dbRecord(db, t, a.record), changed = {};
-  for (const [key, value] of Object.entries(a.fields)) {
+  const D = loadDb(a.source), { f, t, db } = dbTable(D, a.file, a.table), rec = dbRecord(db, t, a.record), changed = setFields(db, t, rec, a.fields);
+  saveDb(D, f);
+  return { record: recName(db, t, rec), changed };
+});
+// setFields writes {field: text} into a record (the db_record_set syntax) and returns the values as stored.
+function setFields(db, t, rec, fields) {
+  const changed = {};
+  for (const [key, value] of Object.entries(fields || {})) {
     const [k1, k2] = String(key).split('.');
     const node = findField(db, t.id, rec.children, k1) || fail(`Нет поля ${k1}. Поля: ${rec.children.map(c => dbHeader(db, t.id, c.id)?.name || c.id).join(', ')}`);
     let target = node, bid = t.id;
@@ -453,15 +460,14 @@ tool('db_record_set', 'Изменить поля записи. fields: {"Price":
     target.data = textToField(type, String(value), target.data);
     changed[key] = fieldView(type, target.data).text;
   }
-  saveDb(D, f);
-  return { record: recName(db, t, rec), changed };
-});
-tool('db_record_add', 'Новая запись копированием существующей (from) с новым именем name. Имя должно быть уникальным; затем поменяйте поля через db_record_set.', { file: S.str(''), table: S.str(''), from: S.str('Индекс или имя образца'), name: S.str('Новое имя'), source: SOURCE }, ['file', 'table', 'from', 'name'], a => {
+  return changed;
+}
+tool('db_record_add', 'Новая запись копированием существующей (from) с новым именем name — в КОНЕЦ таблицы (игра и сохранения ссылаются на записи по номеру, вставка в середину сдвинула бы их). Имя должно быть уникальным; затем поменяйте поля через db_record_set. Новое заклинание удобнее делать через spell_create.', { file: S.str(''), table: S.str(''), from: S.str('Индекс или имя образца'), name: S.str('Новое имя'), source: SOURCE }, ['file', 'table', 'from', 'name'], a => {
   const D = loadDb(a.source), { f, t, db } = dbTable(D, a.file, a.table), src = dbRecord(db, t, a.from);
   if (t.records.some(r => recName(db, t, r).toLowerCase() === a.name.toLowerCase())) fail('Запись с таким именем уже есть');
   const copy = structuredClone(src), nameNode = copy.children.find(c => c.data && /^(Fixed)?String$/.test(dbType(db, t.id, c.id) || ''));
   if (nameNode) nameNode.data = textToField(dbType(db, t.id, nameNode.id), a.name, nameNode.data);
-  t.records.splice(t.records.indexOf(src) + 1, 0, copy);
+  t.records.push(copy);
   saveDb(D, f);
   return { index: t.records.indexOf(copy), name: a.name };
 });
@@ -471,6 +477,96 @@ tool('db_record_delete', 'Удалить запись. Если её имя ис
   saveDb(D, f);
   return { deleted: name };
 });
+// ---- New EI spells: Config/newspells.ini (read only by New EI; game.exe knows spells 0…41 by number) ----
+const spellCodes = () => { const { t, db } = dbTable(loadDb('sp'), 'spells.sdb', 1); return t.records.map(r => { const f = r.children.find(c => c.id === 1); return f?.data ? fieldView(dbType(db, 1, 1), f.data).text.toLowerCase() : ''; }); };
+const readSpellDo = () => exists(NEWSPELLS) ? parseSpellDo(cp1251.decode(readGameFile(NEWSPELLS))) : {};
+function writeSpellDo(all) {
+  checkSpellDo(all, spellCodes());
+  saveGameFile(NEWSPELLS, cp1251.encode(formatSpellDo(all)));
+  return all;
+}
+const doOf = b => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, typeof v === 'boolean' ? +v : v]));
+const DO_PROPS = {
+  like: S.str('Код заклинания игры (номер 0…41): как новое летит и кого задевает — arrow, lightning, fireball, inv_lit, acid_column, firewall, acid_fog, healing, slow, teleport…'),
+  damage: { type: 'string', enum: DAMAGE, description: 'Урон каждой цели силой Effect' },
+  heal: S.bool('Лечить цель на Effect'),
+  drain: S.num('Доля нанесённого урона, которая лечит заклинателя (0.5 — половина)'),
+  effect: S.str('Код заклинания, чей эффект кладётся на цель (slow, stun, speed, strength, weak, invisibility…)'),
+  effect_power: S.num('Сила эффекта (по умолчанию Effect заклинания)'),
+  effect_ticks: S.int('Длительность эффекта в тактах по 55 мс (по умолчанию Duration)'),
+  sound: S.str('Чьи звуки играть (по умолчанию like)'),
+};
+tool('spell_behaviour', 'Поведение заклинаний для New EI (файл Config/newspells.ini; game.exe его не читает). Без behaviour — показать разделы. С behaviour — заменить раздел code; null — удалить раздел. Можно переделать и заклинание игры: [fireball] damage = acid.', { code: S.str('Code заклинания из spells.sdb'), behaviour: { type: ['object', 'null'], description: 'Ключи: ' + DO_KEYS.join(', '), properties: DO_PROPS } }, [], a => {
+  const all = readSpellDo();
+  if (a.behaviour === undefined) return a.code ? { [a.code]: all[a.code.toLowerCase()] ?? null } : all;
+  const code = String(a.code || fail('Нужен code')).toLowerCase();
+  if (a.behaviour === null) delete all[code]; else all[code] = doOf(a.behaviour);
+  return writeSpellDo(all);
+});
+tool('spell_create', 'Новое заклинание для New EI: запись в конец spells.sdb (копия like с новыми Name/Code и полями fields), его поведение в Config/newspells.ini, название и описание (texts "SPELL <code>"), иконка spell00NN из PNG (без неё — иконка like). Оригинальный game.exe нового заклинания не понимает.', {
+  code: S.str('Новый Code латиницей, например frost_arrow'), name: S.str('Внутреннее имя записи (по умолчанию из code: Frost Arrow)'),
+  title: S.str('Название в игре'), description: S.str('Описание в игре'),
+  fields: S.obj('Поля записи как в db_record_set: Mana, Range, Area, Effect, Duration, Speed, Price, Targets, "Shop 1"…', { additionalProperties: { type: ['string', 'number'] } }),
+  behaviour: { type: 'object', description: 'Что делает заклинание (см. spell_behaviour); like обязателен', properties: DO_PROPS, required: ['like'] },
+  icon_png: S.str('Абсолютный путь к PNG иконки (необязательно)'),
+}, ['code', 'behaviour'], a => {
+  const code = String(a.code).trim().toLowerCase(), codes = spellCodes();
+  if (!/^[a-z][a-z0-9_]*$/.test(code)) fail('code — латиница, цифры и _');
+  if (codes.includes(code)) fail(`Заклинание ${code} уже есть (номер ${codes.indexOf(code)}); поведение меняйте через spell_behaviour`);
+  const li = codes.indexOf(String(a.behaviour.like).toLowerCase());
+  if (li < 0 || li >= GAME_SPELLS) fail(`like = ${a.behaviour.like} — нужно заклинание игры (номер 0…41)`);
+  const all = readSpellDo();
+  all[code] = doOf(a.behaviour);
+  checkSpellDo(all, [...codes, code]); // before anything is written
+  const D = loadDb('sp'), { f, t, db } = dbTable(D, 'spells.sdb', 1), copy = structuredClone(t.records[li]);
+  const name = a.name || code.replace(/(^|_)(\w)/g, (_, s, c) => (s ? ' ' : '') + c.toUpperCase());
+  if (t.records.some(r => recName(db, t, r).toLowerCase() === name.toLowerCase())) fail(`Запись «${name}» уже есть`);
+  setFields(db, t, copy, { Name: name, Code: code, ...a.fields });
+  t.records.push(copy);
+  const index = t.records.length - 1, icon = `spell${String(index).padStart(4, '0')}.mmp`;
+  if (a.icon_png) setFields(db, t, copy, { TTI: index }); // the editor and item pictures find the icon by TTI
+  saveDb(D, f);
+  writeSpellDo(all);
+  if (a.title) resUpdate(srcOf('sp')[1], [{ name: `SPELL ${code}`, data: cp1251.encode([a.title, a.description || ''].join('\r\n') + '\r\n') }]);
+  if (a.icon_png) tools.get('texture_import').run({ name: icon, png_path: a.icon_png });
+  const stats = recordFields(db, t, copy).filter(x => /^(Mana|Range|Area|Effect|Duration|Speed|Targets|Price)$/.test(x.name)).map(x => `${x.name}=${x.text}`).join(' ');
+  return { index, name, code, icon: a.icon_png ? icon : `нет: показывается spell${String(li).padStart(4, '0')} (like)`, behaviour: all[code], stats };
+});
+
+// Spells at the sellers: constructors 1…5 sell spell bases by bit N−1 of "Shop 1" (spells.sdb table 1) and ready
+// spells by the templates of table 3 (made only for prototypes the shop deals in).
+const SHOPS = { 1: 'только вещи', 2: 'только магия', 3: 'вещи и магия', 4: 'вещи и магия', 5: 'вещи и магия (без наценки)' };
+const bitOn = (bits, n) => bits[n - 1] === '1';
+const withBit = (bits, n, on) => bits.slice(0, n - 1) + (on ? '1' : '0') + bits.slice(n);
+tool('shop_spells', 'Заклинания у продавцов (конструкторы 1…5: 1 — только вещи, 2 — только магия, 3–5 — всё). Без spell — что продаёт каждая лавка: основы заклинаний (для конструктора) и есть ли у них готовые заклинания (шаблоны). С spell: sell + shop — продавать или нет основу в этой лавке (поле "Shop 1"); ready — готовые заклинания по шаблонам таблицы 3 (true: новому заклинанию копируются шаблоны его like; false: шаблоны удаляются). Лавки пополняются после квестов; New EI добавляет новые заклинания мода и в лавки уже идущей кампании.', {
+  spell: S.str('Code заклинания'), shop: S.int('Номер лавки 1…5 (для sell)'), sell: S.bool('Продавать основу заклинания в лавке shop'), ready: S.bool('Продавать готовые заклинания (шаблоны)'),
+}, [], a => {
+  const D = loadDb('sp'), { f, db } = dbTable(D, 'spells.sdb', 1), protos = dbTable(D, 'spells.sdb', 1).t, tpl = dbTable(D, 'spells.sdb', 3).t;
+  const get = (t, rec, name) => fieldView(dbType(db, t.id, findField(db, t.id, rec.children, name).id), findField(db, t.id, rec.children, name).data).text;
+  const code = r => get(protos, r, 'Code').toLowerCase(), proto = r => get(tpl, r, 'Prototype').toLowerCase();
+  const view = () => Object.fromEntries(Object.entries(SHOPS).map(([n, kind]) => [n, {
+    kind, spells: protos.records.filter(r => bitOn(get(protos, r, 'Shop 1'), +n)).map(r => code(r) + (tpl.records.some(x => proto(x) === code(r) && bitOn(get(tpl, x, 'Shop 1'), +n)) ? '' : ' (только основа)')),
+  }]));
+  if (!a.spell) return view();
+  const sp = String(a.spell).toLowerCase(), rec = protos.records.find(r => code(r) === sp) || fail(`Нет заклинания ${a.spell}`);
+  if (a.sell !== undefined) {
+    if (!SHOPS[a.shop]) fail('shop — номер лавки 1…5');
+    if (a.sell && a.shop === 1) fail('Лавка 1 магией не торгует');
+    setFields(db, protos, rec, { 'Shop 1': withBit(get(protos, rec, 'Shop 1'), a.shop, a.sell) });
+  }
+  if (a.ready === false) tpl.records = tpl.records.filter(r => proto(r) !== sp);
+  if (a.ready === true && !tpl.records.some(r => proto(r) === sp)) {
+    const like = String(readSpellDo()[sp]?.like || '').toLowerCase(), from = tpl.records.filter(r => like && proto(r) === like);
+    if (!from.length) fail(`Нет шаблонов, с которых скопировать: у ${sp} нет like с шаблонами`);
+    const end = tpl.records.length && !proto(tpl.records.at(-1)) ? tpl.records.length - 1 : tpl.records.length; // keep the empty last record last
+    const copies = from.map(r => { const c = structuredClone(r); setFields(db, tpl, c, { Prototype: sp }); return c; });
+    tpl.records.splice(end, 0, ...copies);
+  }
+  if (a.sell === undefined && a.ready === undefined) fail('Укажите sell (+ shop) или ready');
+  saveDb(D, f);
+  return view();
+});
+
 tool('units_list', 'Прототипы существ из базы (монстры и НПС) с моделью и текстурой их расы — для map_object_add.', { query: S.str('Подстрока имени'), limit: S.int('По умолчанию 100') }, [], a => {
   const all = unitPrototypes().filter(u => !a.query || u.name.toLowerCase().includes(a.query.toLowerCase()));
   return { total: all.length, units: all.slice(0, a.limit ?? 100).map(u => ({ name: u.name, kind: u.kind, race: u.race, model: u.model })) };

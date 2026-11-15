@@ -71,6 +71,36 @@ try {
     const two = await sc(); assert.equal(two.length, 2, 'appended'); assert.ok(two[1].text.endsWith('s51') && two[0].text.endsWith('s50'));
     await call('db_record_set', { file: 'acks.db', table: 1, record: 'mcp_test_acks', fields: { 'Scenario.field1#3': 'x' } }, { error: true });
   });
+  await check('spell_create / spell_behaviour (New EI)', async () => {
+    const codes = async () => (await call('db_records', { file: 'spells.sdb', table: 1, limit: 500 })).records.map(r => r[2]);
+    const before = await codes();
+    const s = await call('spell_create', { code: 'mcp_frost', title: 'Ледяная стрела', description: 'Колет и замедляет.', fields: { Mana: 20, Effect: 12 },
+      behaviour: { like: 'arrow', damage: 'piercing', effect: 'slow', drain: 0.5 } });
+    const after = await codes();
+    assert.equal(s.index, before.length, 'appended at the end'); assert.deepEqual(after.slice(0, before.length), before, 'game spells keep their numbers');
+    assert.equal(after[s.index], 'mcp_frost'); assert.match(s.stats, /Mana=20 .*Effect=12/);
+    assert.deepEqual(await call('spell_behaviour', { code: 'mcp_frost' }), { mcp_frost: { like: 'arrow', damage: 'piercing', drain: '0.5', effect: 'slow' } });
+    assert.equal((await call('texts_get', { names: ['SPELL mcp_frost'] }))['SPELL mcp_frost'], 'Ледяная стрела\nКолет и замедляет.\n');
+    await call('spell_create', { code: 'mcp_frost', behaviour: { like: 'arrow' } }, { error: true });
+    await call('spell_create', { code: 'bad_one', behaviour: { like: 'mcp_frost' } }, { error: true });
+    await call('spell_create', { code: 'bad_two', behaviour: { like: 'arrow', damage: 'cold' } }, { error: true });
+    assert.equal((await codes()).length, after.length, 'a refused spell writes nothing');
+    await call('spell_behaviour', { code: 'fireball', behaviour: { damage: 'acid' } });
+    await call('spell_behaviour', { code: 'arrow', behaviour: { damage: 'fire' } }, { error: true }); // mcp_frost is like arrow
+    await call('spell_behaviour', { code: 'fireball', behaviour: null });
+    assert.deepEqual(Object.keys(await call('spell_behaviour')), ['mcp_frost']);
+    // the sellers: arrow's shops were copied; keep shop 2 only and sell ready spells there too
+    assert.ok((await call('shop_spells'))[5].spells.includes('mcp_frost (только основа)'));
+    await call('shop_spells', { spell: 'mcp_frost', shop: 5, sell: false });
+    let v = await call('shop_spells', { spell: 'mcp_frost', ready: true });
+    assert.ok(v[2].spells.includes('mcp_frost') && !v[5].spells.some(x => x.startsWith('mcp_frost')), JSON.stringify(v[2]));
+    const tpl = (await call('db_records', { file: 'spells.sdb', table: 3, limit: 500 })).records;
+    assert.equal(tpl.filter(r => r[1] === 'mcp_frost').length, 2); assert.equal(tpl.at(-1)[1], '', 'the empty record stays last');
+    await call('shop_spells', { spell: 'mcp_frost', shop: 1, sell: true }, { error: true });
+    v = await call('shop_spells', { spell: 'mcp_frost', ready: false });
+    assert.ok(v[2].spells.includes('mcp_frost (только основа)'));
+    return `mcp_frost = №${s.index}`;
+  });
   await check('units_list', async () => { const u = await call('units_list', { query: 'goblin' }); assert.ok(u.total > 0); return u.units[0].name; });
 
   // a fresh zone, then everything on it

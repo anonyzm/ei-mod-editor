@@ -4,6 +4,8 @@ import { readRes } from '/formats/res.js';
 import { dbForFile, readDatabase, writeDatabase, fieldView, textToField } from '/formats/db.js';
 import { schema, recordInfo } from '/lib/gamedb.js';
 import { buildModel, loadFigModel, textureDataUrl, createPreview } from '/lib/eiscene.js';
+import { cp1251 } from '/formats/bytes.js';
+import { NEWSPELLS, GAME_SPELLS, DAMAGE, parseSpellDo, checkSpellDo, formatSpellDo, describeSpellDo } from '/shared/newspells.js';
 
 // Friendly names, in the order users look for things.
 const TABLES = [
@@ -43,6 +45,9 @@ export async function mount(root, [srcArg]) {
     const db = dbForFile(S, e.name);
     if (db && !e.name.endsWith('.adb')) st.files.set(e.name.toLowerCase(), { name: e.name, db, data: readDatabase(e.data, db) });
   }
+  // New EI's behaviour of spells (Config/newspells.ini, shared by both databases); missing file = none
+  let spellDo = {};
+  try { spellDo = parseSpellDo(cp1251.decode(await api.file(NEWSPELLS))); } catch { /* no file yet */ }
   renderTables();
 
   function markChanged() { st.changed.add(st.table.file); saveBtn.disabled = false; dirty.add('database'); }
@@ -136,6 +141,54 @@ export async function mount(root, [srcArg]) {
       }
       return h('div.f', label, fieldInput(bid, node, set(node)));
     })));
+    if (st.table.file === 'spells.sdb' && bid === 1) right.prepend(behaviourBlock(rec));
+  }
+
+  // behaviourBlock shows and edits what the spell does in New EI: game.exe knows spells 0…41 by number, New EI reads
+  // the rest (and changes to those) from Config/newspells.ini.
+  function behaviourBlock(rec) {
+    const t = st.table.t, idx = t.records.indexOf(rec), code = valOf(t, rec)(1).toLowerCase();
+    const codes = t.records.map(r => valOf(t, r)(1).toLowerCase());
+    const names = Object.fromEntries(t.records.map((r, i) => [codes[i], st.infos.get(r)?.title || recName(r)]));
+    const draft = { ...(spellDo[code] || {}) };
+    const opt = (list, cur, none) => [h('option', { value: '' }, none), ...list.map(c => h('option', { value: c, selected: c === String(cur || '').toLowerCase() }, `${names[c] || c} (${c})`))];
+    const sel = (k, list, none) => h('select', { onchange: e => { draft[k] = e.target.value; } }, opt(list, draft[k], none));
+    const num = (k, ph) => h('input', { type: 'number', step: 'any', value: draft[k] ?? '', placeholder: ph, oninput: e => { draft[k] = e.target.value; } });
+    const row = (title, el, hint) => h('div.f', h('label', title, hint ? h('small', ' — ' + hint) : null), el);
+    const d = spellDo[code];
+    const status = d ? describeSpellDo(d, names)
+      : idx < GAME_SPELLS ? `Как в оригинальной игре: поведение заклинания №${idx} зашито в game.exe и New EI по номеру.`
+        : `Поведение не задано — в New EI заклинание №${idx} ничего не делает. Выберите «Как летит» и что оно делает с целью.`;
+    async function write(all) {
+      if (st.changed.has('spells.sdb')) return toast('Сначала сохраните базу («Сохранить в игру»): поведение проверяется по сохранённым заклинаниям', 'err');
+      await guard(async () => {
+        checkSpellDo(all, codes);
+        await api.saveFile(NEWSPELLS, cp1251.encode(formatSpellDo(all)));
+        spellDo = all;
+        renderRecord();
+      }, 'Поведение сохранено в ' + NEWSPELLS + '. Его читает New EI (оригинальная игра — нет).');
+    }
+    const save = () => {
+      const clean = Object.fromEntries(Object.entries(draft).filter(([, v]) => v !== '' && v !== undefined && v !== false));
+      const all = { ...spellDo };
+      if (Object.keys(clean).length) all[code] = clean; else delete all[code];
+      write(all);
+    };
+    const drop = () => { const all = { ...spellDo }; delete all[code]; write(all); };
+    return h('div.form', { style: { border: '1px solid var(--line)', borderRadius: '6px', padding: '8px', marginBottom: '10px' } },
+      h('div', h('b', 'Поведение в New EI'), h('small.sub', ` №${idx} · ${NEWSPELLS}`)),
+      h('div.muted', status),
+      h('details', { open: !d && idx >= GAME_SPELLS },
+        h('summary', d ? 'Изменить' : 'Задать поведение'),
+        row('Как летит и кого задевает', sel('like', codes.slice(0, GAME_SPELLS), idx < GAME_SPELLS ? '— своё (как в игре)' : '— выберите —'), 'полёт, цели и вид — как у этого заклинания игры'),
+        row('Урон', h('select', { onchange: e => { draft.damage = e.target.value; } }, [h('option', { value: '' }, '— нет —'), ...DAMAGE.map(x => h('option', { value: x, selected: x === draft.damage }, x))]), 'силой поля Effect'),
+        row('Лечит цель', h('input', { type: 'checkbox', checked: !!+draft.heal, onchange: e => { draft.heal = e.target.checked ? 1 : ''; } }), 'на Effect'),
+        row('Вампиризм', num('drain', '0.5'), 'доля нанесённого урона, которая лечит заклинателя'),
+        row('Эффект на цель', sel('effect', codes, '— нет —'), 'как у этого заклинания: замедление (slow), оглушение (stun), ускорение (speed)…'),
+        row('Сила эффекта', num('effect_power', 'Effect заклинания')),
+        row('Длительность эффекта, тактов', num('effect_ticks', 'Duration заклинания'), '1 такт = 0,055 с'),
+        row('Звуки', sel('sound', codes, '— как у «Как летит» —')),
+        h('div.row', h('button.primary', { onclick: save }, 'Сохранить поведение'), d ? h('button.danger', { onclick: drop }, 'Убрать') : null)));
   }
 
   function recordAction(kind) {
@@ -148,8 +201,8 @@ export async function mount(root, [srcArg]) {
       const copy = structuredClone(st.rec);
       const nameNode = copy.children.find(c => c.data && /^String$/.test(typeOf(st.table.t.id, c.id) || ''));
       if (nameNode) nameNode.data = textToField('String', fieldView('String', nameNode.data).text + ' copy');
-      list.splice(i + 1, 0, copy); st.rec = copy; st.infos.set(copy, st.infos.get(list[i]));
-      toast('Создана копия. Переименуйте её в поле «Имя» — имя должно быть уникальным.');
+      list.push(copy); st.rec = copy; st.infos.set(copy, st.infos.get(list[i])); // at the end: the game refers to records by number
+      toast('Создана копия в конце таблицы. Переименуйте её в поле «Имя» — имя должно быть уникальным.');
     }
     markChanged(); renderTables(); renderRecords(); renderRecord();
   }
