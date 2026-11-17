@@ -1,3 +1,6 @@
 node_modules/
 backup/
 config.json
+tools/aimap/aimap.exe
+*.exe
+tools/gz2mg/pre/

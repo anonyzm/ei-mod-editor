@@ -147,42 +147,61 @@ export function listObjects(mob) {
   return out;
 }
 
-// Patrol route of a unit: bbbc0000 (logic) -> bbbd0000 (guard point + waypoints bbbe0000).
+// Patrol route of a unit (game.exe 0x5D67D2, New EI ei/logic.go): every bbbd0000 block of the behaviour block bbbc0000 is
+// ONE ROUTE POINT (bbbd0001 = its place); its bbbe0000 children are the looks taken there — where to look (bbbe0001, a spot
+// 1…4 m away on the originals) and for how long (bbbe0002, ticks). Until 2026-11-17 the editor took the looks for the
+// waypoints and wrote a whole route into one block: such a creature stands still and turns its head (legacyRoute finds them).
+// Returned shape is kept for the views: { node: the behaviour block, guard: null, points: [{ node: the bbbd0000 block, … }] }.
+const lookOf = p => child(p, 0xbbbe0000);
 export function getPatrols(unit) {
   const out = [];
   for (const logic of unit.children.filter(c => c.id === 0xbbbc0000)) {
-    for (const p of logic.children.filter(c => c.id === 0xbbbd0000)) {
-      const guard = child(p, 0xbbbd0001);
-      out.push({
-        node: p,
-        guard: guard ? codec.vec3.get(guard.data) : null,
-        points: p.children.filter(c => c.id === 0xbbbe0000).map(w => ({
-          node: w, pos: codec.vec3.get(child(w, 0xbbbe0001).data),
-          wait: codec.u32.get(child(w, 0xbbbe0002)?.data || new Uint8Array(4)),
-          // meaning unknown; originals: 0 almost always, 5/30 on a few archers and elementals
-          param: child(w, 0xbbbe0003) ? codec.f32.get(child(w, 0xbbbe0003).data) : 0,
-          // 1 only on some single-point routes (pigs, dogs, idle NPCs)
-          flag: child(w, 0xbbbe0004)?.data[0] ?? 0,
-        })),
-      });
-    }
+    const nodes = logic.children.filter(c => c.id === 0xbbbd0000);
+    if (!nodes.length) continue;
+    out.push({ node: logic, guard: null, points: nodes.map(p => { const w = lookOf(p); return {
+      node: p, pos: codec.vec3.get(child(p, 0xbbbd0001).data),
+      wait: w ? codec.u32.get(child(w, 0xbbbe0002)?.data || new Uint8Array(4)) : 0,
+      // meaning unknown; originals: 0 almost always, 5/30 on a few archers and elementals
+      param: w && child(w, 0xbbbe0003) ? codec.f32.get(child(w, 0xbbbe0003).data) : 0,
+      flag: (w && child(w, 0xbbbe0004)?.data[0]) ?? 0,
+      looks: p.children.filter(c => c.id === 0xbbbe0000).length,
+    }; }) });
   }
   return out;
 }
-
-export function newWaypoint(pos, wait = 15, param = 0, flag = 0) {
-  return { id: 0xbbbe0000, children: [
-    { id: 0xbbbe0001, data: codec.vec3.set(pos) }, { id: 0xbbbe0002, data: codec.u32.set(wait) },
-    { id: 0xbbbe0003, data: codec.f32.set(param) }, { id: 0xbbbe0004, data: Uint8Array.of(flag ? 1 : 0) },
-  ] };
+// A route written the old way: one block whose "looks" lie far from it. Returns them as the intended points, or null.
+export function legacyRoute(unit) {
+  const logic = unit.children.find(c => c.id === 0xbbbc0000), nodes = logic?.children.filter(c => c.id === 0xbbbd0000) || [];
+  if (nodes.length !== 1) return null;
+  const at = codec.vec3.get(child(nodes[0], 0xbbbd0001).data), looks = nodes[0].children.filter(c => c.id === 0xbbbe0000).map(w => ({ pos: codec.vec3.get(child(w, 0xbbbe0001).data), wait: codec.u32.get(child(w, 0xbbbe0002)?.data || new Uint8Array(4)) }));
+  return looks.length > 1 || looks.some(l => Math.hypot(l.pos[0] - at[0], l.pos[1] - at[1]) > 5) ? looks : null;
 }
-// Change fields of a waypoint node in place ({pos, wait, param, flag}, any subset).
-export function setWaypoint(w, { pos, wait, param, flag }) {
+const newLook = (pos, wait, param, flag) => ({ id: 0xbbbe0000, children: [
+  { id: 0xbbbe0001, data: codec.vec3.set(pos) }, { id: 0xbbbe0002, data: codec.u32.set(wait) },
+  { id: 0xbbbe0003, data: codec.f32.set(param) }, { id: 0xbbbe0004, data: Uint8Array.of(flag ? 1 : 0) },
+] });
+// A route point with one look (2 m to the north until aimLooks turns it along the route).
+export function newWaypoint(pos, wait = 15, param = 0, flag = 0) {
+  return { id: 0xbbbd0000, children: [{ id: 0xbbbd0001, data: codec.vec3.set(pos) }, newLook([pos[0], pos[1] + 2, pos[2]], wait, param, flag)] };
+}
+// Change a route point in place ({pos, wait, param, flag}, any subset): its looks move with it; wait/param/flag are its first look's.
+export function setWaypoint(p, { pos, wait, param, flag }) {
+  if (pos) { const at = child(p, 0xbbbd0001), old = codec.vec3.get(at.data), d = [pos[0] - old[0], pos[1] - old[1], pos[2] - old[2]];
+    at.data = codec.vec3.set(pos);
+    for (const w of p.children.filter(c => c.id === 0xbbbe0000)) { const k = child(w, 0xbbbe0001), v = codec.vec3.get(k.data); k.data = codec.vec3.set([v[0] + d[0], v[1] + d[1], v[2] + d[2]]); } }
+  if (wait === undefined && param === undefined && flag === undefined) return;
+  let w = lookOf(p); if (!w) { const at = codec.vec3.get(child(p, 0xbbbd0001).data); w = newLook([at[0], at[1] + 2, at[2]], 15, 0, 0); p.children.push(w); }
   const put = (id, data) => { const c = child(w, id); if (c) c.data = data; else w.children.push({ id, data }); };
-  if (pos) put(0xbbbe0001, codec.vec3.set(pos));
   if (wait !== undefined) put(0xbbbe0002, codec.u32.set(Math.max(0, Math.round(wait))));
   if (param !== undefined) put(0xbbbe0003, codec.f32.set(+param));
   if (flag !== undefined) put(0xbbbe0004, Uint8Array.of(flag ? 1 : 0));
+}
+// Points with a single look glance on along the route (towards the next point; the last one back at the first).
+export function aimLooks(logic) {
+  const nodes = logic.children.filter(c => c.id === 0xbbbd0000);
+  nodes.forEach((p, i) => { const ls = p.children.filter(c => c.id === 0xbbbe0000); if (ls.length !== 1 || nodes.length < 2) return;
+    const at = codec.vec3.get(child(p, 0xbbbd0001).data), to = codec.vec3.get(child(nodes[(i + 1) % nodes.length], 0xbbbd0001).data), l = Math.hypot(to[0] - at[0], to[1] - at[1]);
+    if (l > 0.1) child(ls[0], 0xbbbe0001).data = codec.vec3.set([at[0] + (to[0] - at[0]) / l * 2, at[1] + (to[1] - at[1]) / l * 2, at[2]]); });
 }
 
 // Deep copy (for duplicating objects).

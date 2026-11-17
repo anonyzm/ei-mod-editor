@@ -13,7 +13,7 @@ import { readMpr } from '../src/formats/mpr.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url)), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ei-mcp-'));
 const game = path.join(tmp, 'game');
-for (const f of ['database.res', 'databaselmp.res', 'texts.res', 'textslmp.res', 'textures.res', 'figures.res', 'menus.res']) fs.cpSync(path.join(GAME, 'Res', f), path.join(game, 'Res', f));
+for (const f of ['database.res', 'databaselmp.res', 'texts.res', 'textslmp.res', 'textures.res', 'figures.res', 'menus.res', 'aiinfo.res']) fs.cpSync(path.join(GAME, 'Res', f), path.join(game, 'Res', f));
 fs.cpSync(path.join(GAME, 'Maps'), path.join(game, 'Maps'), { recursive: true });
 // a save whose scenario checksum matches (a few real saves don't, and save_vars refuses those)
 const saveSlot = fs.existsSync(path.join(GAME, 'saves')) ? fs.readdirSync(path.join(GAME, 'saves')).find(s => fs.existsSync(path.join(GAME, 'saves', s, 'scenario.sav')) && readSav(new Uint8Array(fs.readFileSync(path.join(GAME, 'saves', s, 'scenario.sav')))).ok) : null;
@@ -172,6 +172,18 @@ try {
     assert.ok(t.atlas.includes('mcptest000.mmp'));
     assert.ok((await call('terrain_info', { mpr: 'mcptest' })).tiles_by_type['3 песок (sand)'].includes(5));
     return `${img.text}`;
+  });
+  await check('terrain_passability: block a tile row, graph from the game builder', async () => {
+    const before = await call('terrain_passability', { mpr: 'zone1', image: false });
+    const r = await call('terrain_passability', { mpr: 'zone1', paint: [{ brush: 'block', x0: 100, y0: 100, x1: 140, y1: 101 }] });
+    assert.equal(r.img.subarray(1, 4).toString(), 'PNG');
+    const j = JSON.parse(r.text.split(String.fromCharCode(10))[0]);
+    assert.equal(j.tiles_changed, 20); assert.ok(j.path_graph_nodes_rebuilt > 0, r.text);
+    assert.ok(j.closed_cells_by_class[3] > before.closed_cells_by_class[3], `${j.closed_cells_by_class[3]} vs ${before.closed_cells_by_class[3]}`);
+    assert.equal(j.closed_cells_by_class[0], before.closed_cells_by_class[0]);
+    const back = await call('terrain_passability', { mpr: 'zone1', image: false, paint: [{ brush: 'orig', x0: 100, y0: 100, x1: 140, y1: 101 }] });
+    assert.equal(back.closed_cells_by_class[3], before.closed_cells_by_class[3]);
+    return `${j.pictures_copied} картинок, закрыто людям ${before.closed_cells_by_class[3]} → ${j.closed_cells_by_class[3]}`;
   });
   await check('map objects: add unit, move, patrol, delete', async () => {
     const u = await call('map_object_add', { mob: 'mcptest', unit: (await call('units_list', { query: 'goblin' })).units[0].name, fields: { pos: [60, 60], yaw: 90 } });

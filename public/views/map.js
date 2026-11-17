@@ -5,10 +5,12 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { api, h, guard, toast, dirty } from '/app.js';
 import * as M from '/formats/mob.js';
 import { readMpr, writeMpr, updateNormals, markDirty, heightAt } from '/formats/mpr.js';
-import { units } from '/lib/gamedb.js';
+import { units, zoneTitles } from '/lib/gamedb.js';
+import { directive, loadWorld, ISLAND } from '/shared/world.js';
 import { gameCatalog as buildCatalog, setupUnit, setupObject, unitTemplate } from '/shared/catalog.js';
-import { buildModel, buildTerrain, updateTerrain, retileTerrain, buildWater, loadAtlases, loadModelData } from '/lib/eiscene.js';
-import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRect } from '/formats/aigraph.js';
+import { buildModel, buildTerrain, updateTerrain, retileTerrain, buildWater, loadAtlases, loadModelData, idlePose, unitSkin } from '/lib/eiscene.js';
+import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRect, readGrid, mergeGraph, fixAnchors } from '/formats/aigraph.js';
+import { BLOCK, PASS_BRUSHES, passPalette, retypeTile, copyTileBlocks, withBlockDesc, nibbleColor } from '/shared/passability.js';
 
 const AI_CLASSES = ['летающие', 'мелкие звери', 'гоблины', 'люди и орки', 'класс 4', 'ящеры, скелеты', 'огры, големы', 'тролли, циклопы'];
 
@@ -35,27 +37,51 @@ export async function mount(root, [mobArg, mprArg]) {
   const info = await api.info();
   const mobs = info.maps.filter(f => /\.mob$/i.test(f)).sort(), mprs = info.maps.filter(f => /\.mpr$/i.test(f)).sort();
   const unitInfo = await units();
-  const st = { mobFile: mobArg || 'zone1.mob', mob: null, map: null, objects: [], sel: null, selPt: null, mode: 'select', brush: { tool: 'raise', radius: 4, strength: 0.15, tile: 0, rot: 0 }, mobChanged: false, mprChanged: false, filter: '', kind: 0 };
-  st.mprFile = mprArg || guessMpr(st.mobFile, mprs);
+  // map.txt "#res <mpr> <mob>" ties landscape and objects into a zone; texts.res gives it a name. Grouped by island.
+  const world = await loadWorld({ ...api, loadModelData }).catch(() => null);
+  const zoneNames = world ? await zoneTitles(world.blocks) : new Map();
+  const real = (list, f) => f && list.find(x => x.toLowerCase() === f.toLowerCase());
+  const groups = new Map(), zoneMobs = new Set(); // island -> [[title, mob, mpr]]
+  for (const b of world?.blocks || []) {
+    const r = directive(b.text, 'res')?.split(/\s+/) || [];
+    const mob = real(mobs, r[1] && r[1] + '.mob'), mpr = real(mprs, r[0] && r[0] + '.mpr');
+    if (!mob || !mpr || zoneMobs.has(mob)) continue;
+    zoneMobs.add(mob);
+    const isl = ISLAND[b.allod] || b.allod;
+    if (!groups.has(isl)) groups.set(isl, []);
+    groups.get(isl).push([zoneNames.get(b.id) || b.id, mob, mpr]);
+  }
+  // Quest and multiplayer mobs are not zones: listed by file name, landscape guessed from the name.
+  const other = mobs.filter(m => !zoneMobs.has(m)).map(m => [m, m, guessMpr(m, mprs)]);
+  if (other.length) groups.set('Прочие карты (квесты, сеть)', other);
+  const zoneOf = mob => [...groups.values()].flat().find(z => z[1].toLowerCase() === mob.toLowerCase());
+  const st = { mobFile: mobArg || 'zone1.mob', mob: null, map: null, objects: [], sel: null, selPt: null, mode: 'select', brush: { tool: 'raise', radius: 4, strength: 0.15, tile: 0, rot: 0, pass: 'block', passRadius: 1 }, passClass: 3, passNodes: false, passCopies: [], pal: null, mobChanged: false, mprChanged: false, filter: '', kind: 0 };
+  st.mprFile = mprArg || zoneOf(st.mobFile)?.[2] || guessMpr(st.mobFile, mprs);
 
   // ---------- layout ----------
   const listEl = h('div.body'), propsEl = h('div.body'), vp = h('div.viewport'), overlay = h('div.overlay');
   const scriptArea = h('textarea.code', { style: { flex: 1, border: 0, borderRadius: 0, resize: 'none' }, spellcheck: false, oninput: () => { st.scriptChanged = true; markMob(); } });
   const scriptPane = h('div.center', { style: { display: 'none', flex: 1 } }, h('div.toolbar', h('span.hint', 'Скрипт карты (язык скриптов ПЗ). Изменения сохраняются вместе с картой.')), scriptArea);
   const saveBtn = h('button.primary', { onclick: save, disabled: true }, 'Сохранить');
-  const passBtn = h('button', { title: 'Показать, где могут ходить существа (зелёный — везде, оранжевый — частично, красный — нигде)', onclick: () => togglePassability() }, '◍ Проходимость');
-  const passSel = h('select', { title: 'Класс существ', style: { display: 'none' }, onchange: () => showPassability() }, AI_CLASSES.map((t, k) => h('option', { value: k, selected: k === 3 }, `${k}: ${t}`)));
   const modeBtns = {};
   const modeBtn = (id, label, title) => (modeBtns[id] = h('button', { title, onclick: () => setMode(id) }, label));
   const tabs = h('div.tabs', h('button.on', { onclick: e => showTab(e, 0) }, '3D-вид'), h('button', { onclick: e => showTab(e, 1) }, 'Скрипт карты'));
-  const mobSel = h('select', { style: { width: '100%' }, onchange: e => go(e.target.value, guessMpr(e.target.value, mprs)) }, mobs.map(m => h('option', { value: m, selected: m === st.mobFile }, m)));
-  const mprSel = h('select', { style: { width: '100%' }, title: 'Ландшафт, на котором стоят объекты', onchange: e => go(st.mobFile, e.target.value) }, mprs.map(m => h('option', { value: m, selected: m.toLowerCase() === st.mprFile.toLowerCase() }, m)));
+  const curZone = `${st.mobFile}|${st.mprFile}`;
+  const zoneSel = h('select', { style: { width: '100%' }, title: 'Зона: ландшафт (.mpr) и её объекты (.mob)', onchange: e => go(...e.target.value.split('|')) },
+    [...groups].map(([isl, zs]) => {
+      const count = {}; // same name twice on one island -> add the file name
+      for (const [t] of zs) count[t] = (count[t] || 0) + 1;
+      return h('optgroup', { label: isl }, zs.sort((a, b) => a[0].localeCompare(b[0], 'ru')).map(([t, mob, mpr]) =>
+        h('option', { value: `${mob}|${mpr}`, title: `${mob} + ${mpr}`, selected: `${mob}|${mpr}`.toLowerCase() === curZone.toLowerCase() }, count[t] > 1 ? `${t} (${mob.replace(/\.mob$/i, '')})` : t)));
+    }));
+  // A pair opened by URL that is not a known zone (e.g. a quest mob on another landscape) still shows as itself.
+  if (zoneSel.value.toLowerCase() !== curZone.toLowerCase()) zoneSel.prepend(h('option', { value: curZone, selected: true }, `${st.mobFile} + ${st.mprFile}`));
   const search = h('input.search', { placeholder: 'Поиск объектов…', oninput: e => { st.filter = e.target.value.toLowerCase(); renderList(); } });
   const kindSel = h('select', { onchange: e => { st.kind = +e.target.value; renderList(); } }, h('option', { value: 0 }, 'Все типы'), Object.entries(M.KINDS).map(([k, v]) => h('option', { value: k }, v)));
 
   root.append(h('div.work',
     h('div.side',
-      h('div.head', h('div.f', { style: { width: '100%', display: 'grid', gap: '4px' } }, h('label', 'Файл объектов (.mob)'), mobSel, h('label', 'Ландшафт (.mpr)'), mprSel)),
+      h('div.head', h('div.f', { style: { width: '100%', display: 'grid', gap: '4px' } }, h('label', 'Зона'), zoneSel)),
       h('div.head', search, kindSel, h('button', { onclick: addCreature, title: 'Добавить существо из базы данных' }, '+ Существо'), h('button', { onclick: addObject, title: 'Добавить постройку, дерево, камень… из каталога всех карт' }, '+ Объект'), h('button', { onclick: duplicate, title: 'Копия выбранного (Ctrl+D)' }, '⧉ Копия')),
       listEl),
     h('div.center',
@@ -63,7 +89,7 @@ export async function mount(root, [mobArg, mprArg]) {
         modeBtn('select', '↖ Двигать', 'Выбор и перемещение объектов (W — двигать, E — вращать)'),
         modeBtn('sculpt', '⛰ Рельеф', 'Поднять/опустить/сгладить землю'),
         modeBtn('paint', '▦ Текстуры земли', 'Рисовать тайлами земли'),
-        passBtn, passSel,
+        modeBtn('pass', '◍ Проходимость', 'Где могут ходить существа (сетка ИИ игры 0,5 м) и кисть: закрыть/открыть тайлы, поменять стоимость'),
         h('span.sp'), h('span.hint', 'ЛКМ — выбрать/тащить карту, ПКМ — вращать, колесо — масштаб'), saveBtn),
       tabs, vp, scriptPane),
     h('div.side.right', h('div.head', h('h3', 'Свойства')), propsEl),
@@ -75,7 +101,7 @@ export async function mount(root, [mobArg, mprArg]) {
     vp.style.display = i ? 'none' : ''; scriptPane.style.display = i ? 'flex' : 'none';
   }
   function go(mob, mpr) {
-    if ((st.mobChanged || st.mprChanged) && !confirm('Есть несохранённые изменения. Открыть другую карту без сохранения?')) { mobSel.value = st.mobFile; return; }
+    if ((st.mobChanged || st.mprChanged) && !confirm('Есть несохранённые изменения. Открыть другую карту без сохранения?')) { zoneSel.value = curZone; return; }
     dirty.delete('map');
     location.hash = `map/${encodeURIComponent(mob)}/${encodeURIComponent(mpr)}`;
   }
@@ -102,6 +128,7 @@ export async function mount(root, [mobArg, mprArg]) {
   const brushRing = new THREE.Mesh(new THREE.RingGeometry(0.95, 1, 48), new THREE.MeshBasicMaterial({ color: 0xffd060, depthTest: false, transparent: true }));
   brushRing.renderOrder = 10; brushRing.visible = false; scene.add(brushRing);
   let terrain = null, water = null, alive = true;
+  let passMesh = null, graphPoints = null, grid = null, gridJob = null, gridAgain = false, gridError = null; // passability layer
 
   const resize = () => { const r = vp.getBoundingClientRect(); renderer.setSize(r.width, r.height, false); camera.aspect = r.width / Math.max(1, r.height); camera.updateProjectionMatrix(); };
   const ro = new ResizeObserver(resize); ro.observe(vp);
@@ -131,7 +158,7 @@ export async function mount(root, [mobArg, mprArg]) {
   const snapshot = new Map(st.objects.filter(o => o.kind !== 0xbbbb0000).map(o => [o.node, { key: objKey(o), model: M.getField(o.node, M.OBJ.model), pos: M.getField(o.node, M.OBJ.pos), rot: M.getField(o.node, M.OBJ.rot) }]));
   const graphDirty = new Set();
   window.eiMap = { st, scene, camera, controls, terrain, water }; // handy from the browser console
-  renderList(); renderProps(); setMode('select');
+  renderList(); renderProps(); drawRoutes(); setMode('select');
   overlay.textContent = `${st.objects.length} объектов · загружаю модели…`;
   loadModels().then(() => { if (alive) overlay.textContent = `${st.objects.length} объектов`; });
 
@@ -169,13 +196,20 @@ export async function mount(root, [mobArg, mprArg]) {
     await Promise.all(Array.from({ length: 6 }, worker));
   }
   async function replaceModel(o) {
+    const name = M.getField(o.node, M.OBJ.model), isUnit = o.kind === 0xbbbb0000;
     const tex = M.getField(o.node, M.OBJ.texture);
-    const model = await buildModel(M.getField(o.node, M.OBJ.model), { texture: tex && !/^default/i.test(tex) ? tex : null, complection: M.getField(o.node, M.OBJ.complection) });
+    const skin = isUnit ? unitInfo.byName.get((M.getField(o.node, M.UNIT.unitPrototype) || '').toLowerCase())?.skin : -1;
+    const model = await buildModel(name, { texture: !isUnit && tex && !/^default/i.test(tex) ? tex : null, map: isUnit ? await unitSkin(name, tex, skin) : null, complection: M.getField(o.node, M.OBJ.complection) });
     if (!model || !o.group) return;
+    if (isUnit) {
+      await idlePose(model, name);
+      // human/orc models carry every weapon (rh3.axe00, bwparta00, quiver…); the game shows only what is worn
+      for (const [n, p] of model.userData.parts) if (/\.|^base|^bw|^quiver$|^arrows$/.test(n)) p.parent?.remove(p);
+    }
     for (const c of [...o.group.children]) if (c.userData.marker || c.userData.model) o.group.remove(c);
     model.userData.model = true;
     // unit models have their origin at the hips; the game stands them on their feet
-    if (o.kind === 0xbbbb0000) model.position.z = -new THREE.Box3().setFromObject(model).min.z;
+    if (isUnit) model.position.z = -new THREE.Box3().setFromObject(model).min.z;
     o.group.add(model);
   }
 
@@ -221,13 +255,13 @@ export async function mount(root, [mobArg, mprArg]) {
     if (st.mode !== 'select' && terrain) {
       const hit = pick(e, [terrain]);
       brushRing.visible = !!hit;
-      if (hit) { const r = st.mode === 'paint' ? st.brush.radius * 2 : st.brush.radius; brushRing.position.copy(hit.point).add(new THREE.Vector3(0, 0, 0.2)); brushRing.scale.setScalar(r); }
+      if (hit) { const r = st.mode === 'paint' ? st.brush.radius * 2 : st.mode === 'pass' ? st.brush.passRadius * 2 + 1 : st.brush.radius; brushRing.position.copy(hit.point).add(new THREE.Vector3(0, 0, 0.2)); brushRing.scale.setScalar(r); }
       if (painting) applyBrush(e);
     }
   });
   window.addEventListener('pointerup', onUp);
   function onUp(e) {
-    if (painting) { painting = false; if (st.mode === 'paint') retileTerrain(terrain); }
+    if (painting) { painting = false; if (st.mode === 'paint' || st.mode === 'pass') retileTerrain(terrain); if (st.mode === 'pass') refreshGrid(); }
     if (!downAt || e.target !== renderer.domElement || e.button !== 0 || gizmo.dragging) { downAt = null; return; }
     const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4;
     downAt = null;
@@ -262,13 +296,22 @@ export async function mount(root, [mobArg, mprArg]) {
   }
   function drawRoutes(keepGizmo) {
     clearRoutes();
-    if (!st.sel || st.sel.kind !== 0xbbbb0000) return;
     const up = v => new THREE.Vector3(...v).add(new THREE.Vector3(0, 0, 0.3));
-    const line = (pts, color, dashed) => {
-      const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), dashed ? new THREE.LineDashedMaterial({ color, dashSize: 0.8, gapSize: 0.6, depthTest: false }) : new THREE.LineBasicMaterial({ color, depthTest: false }));
+    const line = (pts, color, dashed, opacity = 1) => {
+      const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), dashed ? new THREE.LineDashedMaterial({ color, dashSize: 0.8, gapSize: 0.6, depthTest: false }) : new THREE.LineBasicMaterial({ color, depthTest: false, transparent: opacity < 1, opacity }));
       if (dashed) l.computeLineDistances();
       l.renderOrder = 4; l.raycast = () => {}; routeRoot.add(l);
     };
+    // Every other creature's route, faint: from the creature itself via its guard point through the waypoints (small dots),
+    // so it is clear whose route it is without clicking.
+    const dotGeo = new THREE.SphereGeometry(0.25, 8, 6), dotMat = new THREE.MeshBasicMaterial({ color: 0xffe060, depthTest: false, transparent: true, opacity: 0.6 });
+    for (const o of st.objects) if (o.kind === 0xbbbb0000 && o !== st.sel) for (const patrol of M.getPatrols(o.node)) {
+      const way = [patrol.guard, ...patrol.points.map(p => p.pos)].filter(Boolean).map(up);
+      if (!way.length) continue;
+      line([o.group.position.clone().add(new THREE.Vector3(0, 0, 0.3)), ...way], 0xffe060, false, 0.45);
+      for (const p of way) { const d = new THREE.Mesh(dotGeo, dotMat); d.position.copy(p); d.renderOrder = 5; d.raycast = () => {}; routeRoot.add(d); }
+    }
+    if (!st.sel || st.sel.kind !== 0xbbbb0000) return;
     const arrow = (a, b, color) => {
       const d = b.clone().sub(a); if (d.length() < 2) return;
       const m = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.1, 10), new THREE.MeshBasicMaterial({ color, depthTest: false }));
@@ -318,12 +361,16 @@ export async function mount(root, [mobArg, mprArg]) {
     brushRing.visible = false;
     if (m !== 'select') gizmo.detach(); else if (st.sel) gizmo.attach(st.sel.group);
     if (m !== 'select' && !terrain) toast('Для этой карты не загружен ландшафт', 'err');
+    if (passMesh) passMesh.visible = m === 'pass';
+    if (graphPoints) graphPoints.visible = m === 'pass';
+    if (m === 'pass' && terrain) refreshGrid();
     renderProps();
   }
   function applyBrush(e) {
     const hit = pick(e, [terrain]);
     if (!hit) return;
     const map = st.map, b = st.brush, cx = hit.point.x, cy = hit.point.y;
+    if (st.mode === 'pass') return passBrush(cx, cy);
     if (st.mode === 'sculpt') {
       const R = b.radius, x0 = Math.max(0, Math.floor(cx - R)), x1 = Math.min(map.W - 1, Math.ceil(cx + R)), y0 = Math.max(0, Math.floor(cy - R)), y1 = Math.min(map.H - 1, Math.ceil(cy + R));
       const step = b.strength * 65535 / map.maxZ * 0.25, target = map.z[Math.round(cy) * map.W + Math.round(cx)];
@@ -343,6 +390,7 @@ export async function mount(root, [mobArg, mprArg]) {
       updateTerrain(terrain, x0 - 1, y0 - 1, x1 + 1, y1 + 1);
     } else {
       const R = b.radius, tx = cx / 2, ty = cy / 2;
+      st.pal = null; // painted slots are no longer free for passability copies
       for (let y = Math.floor(ty - R); y <= Math.ceil(ty + R); y++) for (let x = Math.floor(tx - R); x <= Math.ceil(tx + R); x++) {
         if (x < 0 || y < 0 || x >= map.TW || y >= map.TH || Math.hypot(x + 0.5 - tx, y + 0.5 - ty) > Math.max(0.6, R)) continue;
         map.tiles[y * map.TW + x] = (b.rot << 14) | b.tile;
@@ -364,6 +412,7 @@ export async function mount(root, [mobArg, mprArg]) {
   function renderProps() {
     if (st.mode === 'sculpt') return propsEl.replaceChildren(sculptPanel());
     if (st.mode === 'paint') return propsEl.replaceChildren(paintPanel());
+    if (st.mode === 'pass') return propsEl.replaceChildren(passPanel());
     if (st.selPt) return propsEl.replaceChildren(pointPanel());
     const o = st.sel;
     if (!o) return propsEl.replaceChildren(h('div.empty', 'Кликните по объекту на карте или в списке слева.'), h('p.muted', 'Горячие клавиши: W — двигать, E — вращать, Delete — удалить, Ctrl+D — копия, F — показать выбранное, G — поставить на землю.'));
@@ -621,20 +670,111 @@ export async function mount(root, [mobArg, mprArg]) {
     for (const [node, old] of snapshot) if (!seen.has(node)) { const r = await rectOf(old.model, old.pos, old.rot); if (r) markRect(r); }
     const base = readAiGraph(graphChunk.data);
     if (!graphDirty.size) return base;
+    try { // the game's own builder (tools/aimap) over the fine grid of the current landscape and objects
+      const dirty = (x, y) => graphDirty.has(y * base.W + x);
+      let g = readGrid(await api.aimap(writeMpr(st.map), M.writeMob(st.mob), true));
+      if (g.gW === base.W && g.gH === base.H) {
+        if (fixAnchors(base, g, dirty)) { graphChunk.data = writeAiGraph(base); g = readGrid(await api.aimap(writeMpr(st.map), M.writeMob(st.mob), true)); } // costs from the moved anchors
+        return mergeGraph(base, g.costs, dirty);
+      }
+    } catch (e) { toast('Граф посчитан приблизительно (подобранные правила): ' + e.message, 'err'); }
     const rects = (await Promise.all(statics.map(o => rectOf(M.getField(o.node, M.OBJ.model), M.getField(o.node, M.OBJ.pos), M.getField(o.node, M.OBJ.rot))))).filter(Boolean);
     return buildAiGraph(st.map, rects, { base, dirty: (x, y) => graphDirty.has(y * base.W + x) });
   }
-  let passPoints = null;
-  function togglePassability() {
-    const on = !passPoints;
-    passBtn.classList.toggle('primary', on); passSel.style.display = on ? '' : 'none';
-    if (on) showPassability(); else { scene.remove(passPoints); passPoints = null; }
+  // ---------- passability: game.exe's fine AI grid (0.5 m) over the ground, tile brush ----------
+  function passOverlay() {
+    const map = st.map, { W, H } = map;
+    if (!passMesh) {
+      const uv = new Float32Array(W * H * 2), idx = new Uint32Array((W - 1) * (H - 1) * 6);
+      for (let y = 0, k = 0; y < H; y++) for (let x = 0; x < W; x++, k++) { uv[k * 2] = x / (W - 1); uv[k * 2 + 1] = y / (H - 1); }
+      for (let y = 0, o = 0; y < H - 1; y++) for (let x = 0; x < W - 1; x++, o += 6) { const a = y * W + x; idx.set([a, a + 1, a + W + 1, a, a + W + 1, a + W], o); }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(W * H * 3), 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+      geo.setIndex(new THREE.BufferAttribute(idx, 1));
+      const tex = new THREE.DataTexture(new Uint8Array(map.sx * 64 * map.sy * 64 * 4), map.sx * 64, map.sy * 64, THREE.RGBAFormat);
+      tex.magFilter = tex.minFilter = THREE.NearestFilter;
+      passMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
+      passMesh.renderOrder = 2; passMesh.raycast = () => {};
+      scene.add(passMesh);
+    }
+    const pos = passMesh.geometry.attributes.position.array;
+    for (let y = 0, k = 0; y < H; y++) for (let x = 0; x < W; x++, k++) { pos[k * 3] = x; pos[k * 3 + 1] = y; pos[k * 3 + 2] = heightAt(map, k) + 0.08; }
+    passMesh.geometry.attributes.position.needsUpdate = true; passMesh.geometry.computeBoundingSphere();
+    return passMesh;
   }
-  async function showPassability() {
+  function paintGrid() {
+    if (!grid || !passMesh) return;
+    const tex = passMesh.material.map, px = tex.image.data, sh = st.passClass * 4;
+    if (grid.W !== tex.image.width || grid.H !== tex.image.height) return;
+    for (let i = 0; i < grid.W * grid.H; i++) px.set(nibbleColor((grid.nibble[i] >>> sh) & 15), i * 4);
+    tex.needsUpdate = true;
+  }
+  // Recomputed by tools/aimap from the current landscape and objects (a run at a time, the last one wins).
+  function refreshGrid() {
+    if (!st.map) return;
+    if (gridJob) { gridAgain = true; return; }
+    overlay.textContent = 'Считаю проходимость…';
+    gridJob = api.aimap(writeMpr(st.map), M.writeMob(st.mob), false).then(u8 => {
+      grid = readGrid(u8); gridError = null;
+      if (!alive) return;
+      passOverlay(); paintGrid(); passMesh.visible = st.mode === 'pass';
+      overlay.textContent = `${st.objects.length} объектов`;
+      if (st.mode === 'pass') renderProps();
+    }).catch(e => {
+      // "Нет такого метода": the server process predates /api/aimap and needs a restart
+      gridError = /Нет такого метода/.test(e.message) ? 'сервер редактора устарел — перезапустите его (node Editor/server.js)' : e.message;
+      overlay.textContent = `${st.objects.length} объектов`; toast('Проходимость: ' + gridError, 'err');
+      if (st.mode === 'pass') renderProps();
+    })
+      .finally(() => { gridJob = null; if (gridAgain) { gridAgain = false; refreshGrid(); } });
+  }
+  function passBrush(cx, cy) {
+    const map = st.map, br = PASS_BRUSHES.find(x => x.key === st.brush.pass), R = st.brush.passRadius, tx = Math.floor(cx / 2), ty = Math.floor(cy / 2);
+    st.pal ??= passPalette(map, terrain.material.map(m => m.map?.userData.image));
+    const atlases = new Set();
+    try {
+      for (let y = ty - R; y <= ty + R; y++) for (let x = tx - R; x <= tx + R; x++) {
+        if (x < 0 || y < 0 || x >= map.TW || y >= map.TH || Math.hypot(x - tx, y - ty) > R + 0.5) continue;
+        const c = retypeTile(map, st.pal, y * map.TW + x, br.type);
+        if (c) { st.passCopies.push(c); atlases.add(c.to >> 6); }
+      }
+    } catch (e) { painting = false; toast(e.message, 'err'); }
+    for (const a of atlases) {
+      if (!terrain.material[a]) { // a new atlas for the copied pictures
+        const img = st.pal.images[a], t = new THREE.DataTexture(img.rgba, img.width, img.height, THREE.RGBAFormat);
+        t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.userData.image = img;
+        terrain.material[a] = new THREE.MeshLambertMaterial({ map: t });
+      }
+      terrain.material[a].map.needsUpdate = true;
+    }
+    const x0 = (tx - R) * 2 - 2, y0 = (ty - R) * 2 - 2, x1 = (tx + R + 1) * 2 + 2, y1 = (ty + R + 1) * 2 + 2;
+    markDirty(map, x0, y0, x1, y1); updateTerrain(terrain, x0, y0, x1, y1); markGraph(x0, y0, x1, y1);
+    markMpr();
+  }
+  function passPanel() {
+    const b = st.brush, map = st.map;
+    const blocked = map ? map.tiles.reduce((n, t) => n + (map.tileTypes[t & 0x3fff] === BLOCK), 0) : 0;
+    const k = st.passClass, closed = grid ? grid.nibble.reduce((n, v) => n + !((v >>> (k * 4)) & 15), 0) : 0;
+    const sw = c => h('span.swatch', { style: { background: `rgba(${c.slice(0, 3).map(Math.round).join(',')},0.9)` } });
+    const radius = h('span', ' ' + b.passRadius);
+    return h('div.form', h('h4', 'Проходимость'),
+      h('p.muted', 'Цвет — сетка ИИ игры (клетки 0,5 м) для выбранного класса существ: так её строит game.exe из рельефа, воды, типов тайлов и объектов.'),
+      h('div.f', h('label', 'Класс существ'), h('select', { onchange: e => { st.passClass = +e.target.value; paintGrid(); renderProps(); if (st.passNodes) showGraphNodes(); } }, AI_CLASSES.map((t, i) => h('option', { value: i, selected: i === k }, `${i}: ${t}`)))),
+      h('div.muted', sw(nibbleColor(14)), ' дорога  ', sw(nibbleColor(13)), ' обычно  ', sw(nibbleColor(10)), ' дорого  ', sw(nibbleColor(3)), ' болото  ', sw(nibbleColor(0)), ' закрыто'),
+      grid ? h('p.muted', `Закрыто клеток: ${closed} из ${grid.W * grid.H}. Тайлов «Непроходимо»: ${blocked}.`) : h('p.muted', gridError ? '⚠ Не удалось посчитать: ' + gridError : 'Считаю…'),
+      h('div.f', h('label', 'Кисть (тайлы 2×2 м)'), h('div.row', { style: { flexWrap: 'wrap' } }, PASS_BRUSHES.map(x => h('button', { className: b.pass === x.key ? 'primary' : '', title: x.hint, onclick: () => { b.pass = x.key; renderProps(); } }, x.label)))),
+      h('p.muted', PASS_BRUSHES.find(x => x.key === b.pass).hint),
+      h('div.f', h('label', 'Радиус кисти (в тайлах)', radius), h('input', { type: 'range', min: 0, max: 6, step: 1, value: b.passRadius, oninput: e => { b.passRadius = +e.target.value; radius.textContent = ' ' + b.passRadius; } })),
+      h('div.f', h('label', h('input', { type: 'checkbox', checked: st.passNodes, onchange: e => { st.passNodes = e.target.checked; showGraphNodes(); } }), ' Узлы графа из .mob (4×4 м)', h('small', ' — дальние маршруты; пересчитываются при сохранении'))),
+      h('p.muted', 'Тип тайла меняется без смены картинки: тайл переезжает на копию своей картинки в свободной ячейке атласа (или в новом атласе). Обрывы и объекты закрывают клетки сами — их меняют «Рельефом» и объектами. При сохранении пишутся .mpr, атласы в textures.res, тип 15 в aiinfo.res/tileDesc.reg и граф в .mob; оригиналы — в Editor/backup.'));
+  }
+  async function showGraphNodes() {
+    if (graphPoints) { scene.remove(graphPoints); graphPoints = null; }
+    if (!st.passNodes) return;
     const gr = await guard(currentGraph);
-    if (passPoints) scene.remove(passPoints);
-    if (!gr) { toast(graphChunk ? 'Нет ландшафта' : 'В этом файле нет графа проходимости — он хранится в основном .mob зоны', 'err'); passBtn.classList.remove('primary'); passSel.style.display = 'none'; passPoints = null; return; }
-    const L = gr.layers[+passSel.value], P = [], C = [];
+    if (!gr) { toast(graphChunk ? 'Нет ландшафта' : 'В этом файле нет графа проходимости — он хранится в основном .mob зоны', 'err'); return; }
+    const L = gr.layers[st.passClass], P = [], C = [];
     for (let y = 0; y < gr.H; y++) for (let x = 0; x < gr.W; x++) {
       let open = 0;
       for (let d = 0; d < 8; d++) if (L.cost[(y * gr.W + x) * 8 + d] !== 0xffff) open++;
@@ -645,12 +785,24 @@ export async function mount(root, [mobArg, mprArg]) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
-    passPoints = new THREE.Points(geo, new THREE.PointsMaterial({ size: 1.6, vertexColors: true, transparent: true, opacity: 0.85 }));
-    scene.add(passPoints);
+    graphPoints = new THREE.Points(geo, new THREE.PointsMaterial({ size: 1.6, vertexColors: true, transparent: true, opacity: 0.85 }));
+    graphPoints.visible = st.mode === 'pass';
+    scene.add(graphPoints);
   }
 
   async function save() {
     await guard(async () => {
+      if (st.passCopies.length) { // copied tile pictures -> the atlas files, block by block (no re-encoding)
+        const name = a => `${st.map.name}${String(a).padStart(3, '0')}.mmp`, raws = new Map(), out = new Set();
+        const raw = async a => { if (!raws.has(a)) raws.set(a, await api.resEntry('Res/textures.res', name(a)).catch(async () => (await raw(0)).slice())); return raws.get(a); };
+        for (const c of st.passCopies) { copyTileBlocks(await raw(c.from >> 6), await raw(c.to >> 6), c.from, c.to); out.add(c.to >> 6); }
+        await api.resUpdate('Res/textures.res', [...out].map(a => ({ name: name(a), data: raws.get(a) })));
+        st.passCopies = [];
+      }
+      if (st.mprChanged && st.map.tileTypes.includes(BLOCK)) { // type 15 needs its tileDesc.reg section (game and New EI)
+        const reg = withBlockDesc(await api.resEntry('Res/aiinfo.res', 'tileDesc.reg'));
+        if (reg) { await api.resUpdate('Res/aiinfo.res', [{ name: 'tileDesc.reg', data: reg }]); toast('В aiinfo.res/tileDesc.reg добавлен тип 15 BLOCK'); }
+      }
       if (graphChunk && (st.mobChanged || st.mprChanged)) {
         const gr = await currentGraph();
         if (graphDirty.size) { graphChunk.data = writeAiGraph(gr); st.mobChanged = true; toast(`Проходимость пересчитана для ${graphDirty.size} участков 4×4 м`); }
@@ -665,6 +817,7 @@ export async function mount(root, [mobArg, mprArg]) {
       }
       if (st.mprChanged) { await api.saveFile('Maps/' + st.mprFile, writeMpr(st.map)); st.mprChanged = false; }
       saveBtn.disabled = true; dirty.delete('map');
+      if (st.passNodes) showGraphNodes();
     }, 'Карта сохранена');
   }
 

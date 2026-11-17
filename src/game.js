@@ -42,7 +42,13 @@ export function writeGameFile(abs, data) {
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   const tmp = abs + '.tmp-editor';
   fs.writeFileSync(tmp, data);
-  fs.renameSync(tmp, abs); // atomic replace: a crash never leaves a half-written game file
+  for (let i = 0; ; i++) { // atomic replace: a crash never leaves a half-written game file
+    try { fs.renameSync(tmp, abs); break; }
+    catch (e) { // Windows: a reader (antivirus, the other editor process) briefly holds the target open
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes(e.code) || i >= 720) throw e; // up to 3 min (New EI tests keep textures.res open)
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+    }
+  }
   resCache.delete(abs);
 }
 

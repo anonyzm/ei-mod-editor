@@ -16,7 +16,9 @@ import { decodeMmp, mmpInfo, encodeMmpArgb8, encodeMmpDxt1, FMT } from './src/fo
 import { readSav, writeSav, savVars, setSavVars } from './src/formats/sav.js';
 import { readModel, writeModel, readFig, writeFig, readLnk, writeLnk } from './src/formats/fig.js';
 import { objToParts } from './src/formats/obj.js';
-import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRect } from './src/formats/aigraph.js';
+import { AIGRAPH_ID, readAiGraph, writeAiGraph, buildAiGraph, modelBox, objectRect, readGrid, mergeGraph, fixAnchors, CLASSES } from './src/formats/aigraph.js';
+import { aimapRaw } from './src/aimap.js';
+import { BLOCK, PASS_BRUSHES, passPalette, retypeTile, copyTileBlocks, withBlockDesc, nibbleColor } from './src/shared/passability.js';
 import { loadWorld, saveWorld, createZone, directive, exitsOf, ISLAND } from './src/shared/world.js';
 import { gameCatalog, setupUnit, setupObject, raceTexture, unitStandsHome, unitTemplate } from './src/shared/catalog.js';
 import { encodePng, decodePng, resizeRgba } from './src/png.js';
@@ -167,11 +169,22 @@ async function markObj(set, map, o) {
   markArea(set, map, r.x - ex - 2, r.y - ey - 2, r.x + ex + 2, r.y + ey + 2);
 }
 // Rebuild the marked part of the mob's path graph (only zone base mobs have one). Returns nodes rebuilt.
+// graphFallback: why the last rebuild used the fitted rules (callers report it: those graphs strand walkers in New EI).
+let graphFallback = null;
 async function updateGraph(mob, map, set) {
+  graphFallback = null;
   const ch = mob.chunks.find(c => c.id === AIGRAPH_ID);
   if (!ch || !map || !set.size) return 0;
   const base = readAiGraph(ch.data);
   if (base.W !== map.sx * 8 || base.H !== map.sy * 8) return 0;
+  try { // the game's own builder over its fine grid (tools/aimap)
+    const dirty = (x, y) => set.has(y * base.W + x);
+    let g = readGrid(await aimapRaw(writeMpr(map), M.writeMob(mob), { graph: true }));
+    if (g.gW === base.W && g.gH === base.H) {
+      if (fixAnchors(base, g, dirty)) { ch.data = writeAiGraph(base); g = readGrid(await aimapRaw(writeMpr(map), M.writeMob(mob), { graph: true })); } // costs from the moved anchors
+      ch.data = writeAiGraph(mergeGraph(base, g.costs, dirty)); return set.size;
+    }
+  } catch (e) { graphFallback = e.message; console.error('aimap:', e.message, '— граф по подобранным правилам'); }
   const rects = (await Promise.all(M.listObjects(mob).filter(o => o.kind !== UNIT).map(objRect))).filter(Boolean);
   ch.data = writeAiGraph(buildAiGraph(map, rects, { base, dirty: (x, y) => set.has(y * base.W + x) }));
   return set.size;
@@ -184,7 +197,7 @@ async function editMob(a, fn) {
   const out = await fn({ mob, map, dirty, mark: o => markObj(dirty, map, o), gz: (x, y) => groundZ(map, x, y) });
   const n = await updateGraph(mob, map, dirty);
   saveGameFile(rel, M.writeMob(mob));
-  return { ...out, saved: rel, ...(n ? { path_graph_nodes_rebuilt: n } : {}), ...(map ? {} : { warning: 'Ландшафт не найден — укажите mpr; высоты точек патруля посчитаны как 0' }) };
+  return { ...out, saved: rel, ...(n ? { path_graph_nodes_rebuilt: n } : {}), ...(n && graphFallback ? { graph_warning: 'Граф построен по подобранным правилам, не построителем игры (tools/aimap): ' + graphFallback + '. Повторите правку, когда aimap заработает.' } : {}), ...(map ? {} : { warning: 'Ландшафт не найден — укажите mpr; высоты точек патруля посчитаны как 0' }) };
 }
 
 function setBriefingId(mob, o, f) {
@@ -232,7 +245,7 @@ async function editMpr(a, fn, { graph = true } = {}) {
     const mob = M.readMob(readGameFile(mobRel)), set = new Set();
     markArea(set, map, rect[0] - 1, rect[1] - 1, rect[2] + 1, rect[3] + 1);
     const n = await updateGraph(mob, map, set);
-    if (n) { saveGameFile(mobRel, M.writeMob(mob)); out.saved.push(mobRel); out.path_graph_nodes_rebuilt = n; }
+    if (n) { saveGameFile(mobRel, M.writeMob(mob)); out.saved.push(mobRel); out.path_graph_nodes_rebuilt = n; if (graphFallback) out.graph_warning = 'Граф построен по подобранным правилам, не построителем игры (tools/aimap): ' + graphFallback + '. Повторите правку, когда aimap заработает.'; }
   }
   if (!out.path_graph_nodes_rebuilt) out.warning = `Граф проходимости не обновлён: нет ${mobRel} с графом. Откройте основной .mob зоны в редакторе и сохраните.`;
   return out;
@@ -676,24 +689,25 @@ tool('map_object_delete', 'Удалить объект (id) или пачку о
   }
   return a.ids ? { deleted: ids.length } : { deleted: a.id, name: names[0] };
 }));
-tool('map_patrol_set', 'Маршрут патруля существа. points — новый маршрут целиком: точка [x, y] или {pos: [x, y], wait, param, flag} (высота берётся с земли); [] — убрать маршрут. edit — поправить отдельные точки, не трогая остальные: [{index, pos?, wait?, param?, flag?}]. wait — ожидание в точке (в оригиналах чаще 30…150, 3600 — стоять долго); param и flag — малоизученные поля (почти всегда 0). guard — точка охраны [x, y]. Существо должно иметь блок поведения (он есть у существ, добавленных map_object_add).', { mob: MOB, mpr: MPR, id: S.int('id существа'), points: S.arr('[[x, y] | {pos, wait, param, flag}, …]', {}), edit: S.arr('[{index, pos?, wait?, param?, flag?}]', { type: 'object' }), wait: S.int('Ожидание по умолчанию для точек без wait, 15'), guard: S.arr('Точка охраны [x, y] (необязательно)', { type: 'number' }) }, ['mob', 'id'], a => editMob(a, async ({ mob, gz }) => {
+tool('map_patrol_set', 'Маршрут патруля существа. points — новый маршрут целиком: точка [x, y] или {pos: [x, y], wait, param, flag} (высота берётся с земли); [] — убрать маршрут. edit — поправить отдельные точки, не трогая остальные: [{index, pos?, wait?, param?, flag?}]. wait — ожидание в точке (в оригиналах чаще 30…150, 3600 — стоять долго); param и flag — малоизученные поля (почти всегда 0). guard — «дом» существа [x, y]. cyclic: true — ходить по кругу, false — туда и обратно. Каждая точка — место, куда существо приходит и стоит wait тиков, глядя дальше по маршруту. Существо должно иметь блок поведения (он есть у существ, добавленных map_object_add).', { mob: MOB, mpr: MPR, id: S.int('id существа'), cyclic: { type: 'boolean', description: 'По кругу (true) или туда и обратно (false)' }, points: S.arr('[[x, y] | {pos, wait, param, flag}, …]', {}), edit: S.arr('[{index, pos?, wait?, param?, flag?}]', { type: 'object' }), wait: S.int('Ожидание по умолчанию для точек без wait, 15'), guard: S.arr('Точка охраны [x, y] (необязательно)', { type: 'number' }) }, ['mob', 'id'], a => editMob(a, async ({ mob, gz }) => {
   const o = findObj(mob, a.id);
   if (o.kind !== UNIT) fail('Это не существо');
   const logic = o.node.children.find(c => c.id === 0xbbbc0000) || fail('У существа нет блока поведения — скопируйте патрульного с другой карты (map_object_add copy_of)');
-  let p = logic.children.find(c => c.id === 0xbbbd0000);
-  const pos = M.getField(o.node, M.OBJ.pos), at = xy => (Array.isArray(xy) && xy.length >= 2 && xy.every(Number.isFinite) ? [xy[0], xy[1], gz(xy[0], xy[1])] : fail('Точка: [x, y]'));
-  if (!p && (a.points?.length || a.guard)) { p = { id: 0xbbbd0000, children: [{ id: 0xbbbd0001, data: M.codec.vec3.set(at(pos)) }] }; logic.children.push(p); M.setField(logic, [0xbbbc0003, 'u32'], 2); }
-  if (!p) fail('У существа нет маршрута — задайте points');
-  if (a.guard) M.setField(p, [0xbbbd0001, 'vec3'], at(a.guard));
-  if (a.points) p.children = p.children.filter(c => c.id !== 0xbbbe0000).concat(a.points.map(pt => Array.isArray(pt)
+  const at = xy => (Array.isArray(xy) && xy.length >= 2 && xy.every(Number.isFinite) ? [xy[0], xy[1], gz(xy[0], xy[1])] : fail('Точка: [x, y]'));
+  // every route point is its own bbbd0000 block of the behaviour block (see mob.js getPatrols)
+  if (a.points) { logic.children = logic.children.filter(c => c.id !== 0xbbbd0000).concat(a.points.map(pt => Array.isArray(pt)
     ? M.newWaypoint(at(pt), a.wait ?? 15)
     : M.newWaypoint(at(pt.pos), pt.wait ?? a.wait ?? 15, pt.param ?? 0, pt.flag ?? 0)));
-  const wps = p.children.filter(c => c.id === 0xbbbe0000);
+    if (a.points.length) M.setField(logic, [0xbbbc0003, 'u32'], 2); }
+  const wps = logic.children.filter(c => c.id === 0xbbbd0000);
   for (const e of a.edit || []) {
     const w = wps[e.index] || fail(`Нет точки №${e.index} (точек: ${wps.length}, нумерация с 0)`);
     M.setWaypoint(w, { ...e, pos: e.pos && at(e.pos) });
   }
-  if (!wps.length) { logic.children = logic.children.filter(c => c !== p); unitStandsHome(o.node); } // [] = no route
+  if (a.guard && logic.children.some(c => c.id === 0xbbbc0005)) M.setField(logic, [0xbbbc0005, 'vec3'], at(a.guard));
+  if (a.cyclic !== undefined && logic.children.some(c => c.id === 0xbbbc0002)) logic.children.find(c => c.id === 0xbbbc0002).data = Uint8Array.of(a.cyclic ? 1 : 0);
+  M.aimLooks(logic);
+  if (!wps.length) unitStandsHome(o.node); // [] = no route
   return objDetails(o);
 }));
 tool('map_script_get', 'Скрипт карты (язык скриптов ПЗ: GlobalVars, Declare/Script/WorldScript, триггеры).', { mob: MOB }, ['mob'], a => (M.getScript(M.readMob(readGameFile(mapRel(a.mob, 'mob')))) ?? '').replace(/\r\n/g, '\n'));
@@ -746,8 +760,13 @@ tool('terrain_sculpt', 'Изменить рельеф пачкой операц�
   for (const op of a.ops) rect = unionRect(rect, sculpt(map, op));
   return rect && finishHeights(map, rect);
 }));
-tool('terrain_set_heights', 'Задать рельеф сеткой высот (м): rows[j][i] — высота в точке (x0 + i*step, y0 + j*step), между точками — плавная интерполяция. Удобно, чтобы «нарисовать» холмы, долины, реки целиком. blend 0…1 смешивает со старым рельефом.', { mpr: MPR, x0: S.num('По умолчанию 0'), y0: S.num('По умолчанию 0'), step: S.num('Шаг сетки, м'), rows: S.arr('Строки высот', { type: 'array', items: { type: 'number' } }), blend: S.num('1 — заменить (по умолчанию)') }, ['mpr', 'step', 'rows'], a => editMpr(a, map => {
+tool('terrain_set_heights', 'Задать рельеф сеткой высот (м): rows[j][i] — высота в точке (x0 + i*step, y0 + j*step), между точками — плавная интерполяция. Удобно, чтобы «нарисовать» холмы, долины, реки целиком. blend 0…1 смешивает со старым рельефом.', { mpr: MPR, x0: S.num('По умолчанию 0'), y0: S.num('По умолчанию 0'), step: S.num('Шаг сетки, м'), rows: S.arr('Строки высот', { type: 'array', items: { type: 'number' } }), blend: S.num('1 — заменить (по умолчанию)'), max_height: S.num('Новая максимальная высота карты, м (потолок рельефа; у оригиналов 22…53). Прежний рельеф и вода сохраняют свои высоты') }, ['mpr', 'step', 'rows'], a => editMpr(a, map => {
   const x0 = a.x0 ?? 0, y0 = a.y0 ?? 0, R = a.rows, nY = R.length, nX = R[0]?.length || 0, blend = a.blend ?? 1;
+  const rescale = a.max_height > 0 && Math.abs(a.max_height - map.maxZ) > 1e-3;
+  if (rescale) { // heights are stored as shares of the ceiling: move the ceiling, keep every height
+    const f = map.maxZ / a.max_height; for (const arr of [map.z, map.wz]) for (let i = 0; i < arr.length; i++) arr[i] = Math.min(65535, Math.round(arr[i] * f));
+    map.maxZ = a.max_height; markDirty(map, 0, 0, map.W - 1, map.H - 1);
+  }
   if (nX < 2 || nY < 2 || R.some(r => r.length !== nX)) fail('rows — прямоугольная сетка минимум 2×2');
   const rect = [Math.max(0, Math.ceil(x0)), Math.max(0, Math.ceil(y0)), Math.min(map.W - 1, Math.floor(x0 + (nX - 1) * a.step)), Math.min(map.H - 1, Math.floor(y0 + (nY - 1) * a.step))];
   for (let y = rect[1]; y <= rect[3]; y++) for (let x = rect[0]; x <= rect[2]; x++) {
@@ -756,7 +775,7 @@ tool('terrain_set_heights', 'Задать рельеф сеткой высот (
     const k = y * map.W + x;
     map.z[k] = toRaw(map, heightAt(map, k) * (1 - blend) + h * blend);
   }
-  return finishHeights(map, rect);
+  return finishHeights(map, rescale ? [0, 0, map.W - 1, map.H - 1] : rect);
 }));
 tool('terrain_import_heightmap', 'Загрузить рельеф из PNG-карты высот (серый: чёрный = min, белый = max метров) на всю карту или в прямоугольник. Подходит для карт из World Machine, Gaea, Photoshop.', { mpr: MPR, png_path: S.str('Абсолютный путь к PNG'), min: S.num('Высота чёрного, м (по умолчанию 0)'), max: S.num('Высота белого, м (по умолчанию максимальная высота карты)'), x0: S.num(''), y0: S.num(''), x1: S.num(''), y1: S.num('') }, ['mpr', 'png_path'], a => editMpr(a, map => {
   const img = decodePng(fs.readFileSync(a.png_path)), lo = a.min ?? 0, hi = a.max ?? map.maxZ;
@@ -791,6 +810,29 @@ tool('terrain_autotile', 'Покраска земли с переходами, �
     return rect;
   }, { graph: false }).then(r => ({ ...r, ...stats }));
 });
+tool('terrain_classes', 'Классы земли по вершинам сетки (шаг 2 м), как их видит terrain_autotile: каждой вершине — класс, чей средний цвет ближе всего к цвету углов тайлов вокруг неё. rows[j] — строка y = 2*j, в ней по символу на вершину: номер класса в names (0-9, a-z). Нужно, чтобы перенести покраску (сдвинуть, исказить, перекрасить по уклону) и вернуть её через terrain_autotile.', { mpr: MPR, classes: S.obj('{класс: [тайлы]}') }, ['mpr', 'classes'], a => {
+  const map = loadMap(mapRel(a.mpr, 'mpr')) || fail('Нет ландшафта');
+  const atl = atlasImages(map), names = Object.keys(a.classes), VW = map.TW + 1, VH = map.TH + 1;
+  const probes = new Map(), probe = t => probes.get(t) ?? (probes.set(t, tileProbe(atl, t)), probes.get(t));
+  const target = names.map(n => { const s = [0, 0, 0]; let k = 0; for (const t of a.classes[n]) for (const c of probe(t)) { s[0] += c[0]; s[1] += c[1]; s[2] += c[2]; k++; } return s.map(v => v / k); });
+  const rows = [];
+  for (let j = 0; j < VH; j++) { let row = '';
+    for (let i = 0; i < VW; i++) {
+      const s = [0, 0, 0]; let k = 0;
+      for (const [dx, dy, corner] of [[-1, -1, 2], [0, -1, 3], [0, 0, 0], [-1, 0, 1]]) { const tx = i + dx, ty = j + dy; if (tx < 0 || ty < 0 || tx >= map.TW || ty >= map.TH) continue; const c = probe(map.tiles[ty * map.TW + tx])[corner]; s[0] += c[0]; s[1] += c[1]; s[2] += c[2]; k++; }
+      let b = 0; for (let t = 1; t < target.length; t++) if (rgbDist(s.map(v => v / k), target[t]) < rgbDist(s.map(v => v / k), target[b])) b = t;
+      row += b.toString(36);
+    }
+    rows.push(row); }
+  return { names, step: 2, rows };
+});
+tool('terrain_jitter', 'Дрожание вершин: случайный сдвиг вершин сетки по горизонтали, как на оригинальных картах (там сдвинута примерно половина вершин, в среднем на 40–50 единиц из 127) — без него склоны и берега выглядят как ровная сетка. share — доля сдвигаемых вершин (0…1, по умолчанию 0.5), amount — наибольший сдвиг по каждой оси (0…127, по умолчанию 64; 0 — убрать дрожание), seed. Край карты не трогается.', { mpr: MPR, share: S.num('Доля вершин, 0.5'), amount: S.num('Наибольший сдвиг, 64'), seed: S.num('') }, ['mpr'], a => editMpr(a, map => {
+  const share = a.share ?? 0.5, amt = Math.max(0, Math.min(127, a.amount ?? 64)), seed = a.seed ?? 1;
+  for (let y = 1; y < map.H - 1; y++) for (let x = 1; x < map.W - 1; x++) { const k = y * map.W + x, on = amt && hash(x, y, seed) < share;
+    map.dx[k] = on ? Math.round((hash(x, y, seed + 1) * 2 - 1) * amt) : 0; map.dy[k] = on ? Math.round((hash(x, y, seed + 2) * 2 - 1) * amt) : 0; }
+  markDirty(map, 0, 0, map.W - 1, map.H - 1);
+  return [0, 0, map.W - 1, map.H - 1];
+}, { graph: false }));
 const LIQUIDS = { water: { type: 3, color: [0.19, 0.32, 0.65, 0.6], selfIllum: 0, wave: 0.5, warp: 0, reserved: [0, 0, 0] }, lava: { type: 3, color: [0.8, 0, 0, 1], selfIllum: 1, wave: 0.5, warp: 0, reserved: [0, 0, 0] },
   swamp: { type: 3, color: [0.19, 0.54, 0.36, 0.7], selfIllum: 0, wave: 0.5, warp: 0, reserved: [0, 0, 0] } }; // swamp: zone1/2/3obr/7 material
 function liquidMaterial(map, m) {
@@ -852,9 +894,14 @@ tool('terrain_render', 'Картинка ландшафта сверху (PNG): 
 // ---- zones ----
 tool('zones_list', 'Зоны мира из map.txt: id, остров (gipat, ingos, suslanger), тип (game — карта, brief — база, edge — переход), файлы карты (#res) и переходы.', { allod: S.str('Фильтр по острову') }, [], async a => (await loadWorld(io)).blocks.filter(b => !a.allod || b.allod === a.allod).map(b => ({ id: b.id, allod: b.allod, type: b.type, res: directive(b.text, 'res') || null, exits: exitsOf(b.text).map(x => `${x.n}→${x.to}#${x.entrance}`) })));
 tool('zone_get', 'Блок зоны из map.txt целиком (#res, #maps, #position, #exit, #deploy…).', { id: S.str('id зоны') }, ['id'], async a => ((await loadWorld(io)).blocks.find(b => b.id === a.id) || fail('Нет зоны ' + a.id)).text.replace(/\r\n/g, '\n'));
-tool('zone_set', 'Заменить блок зоны в map.txt (текст в формате zone_get). Строку #zone <id> не меняйте.', { id: S.str(''), text: S.str('') }, ['id', 'text'], async a => {
-  const w = await loadWorld(io), b = w.blocks.find(x => x.id === a.id) || fail('Нет зоны ' + a.id);
+tool('zone_set', 'Заменить блок зоны в map.txt (текст в формате zone_get). Строку #zone <id> не меняйте. Если зоны нет — блок добавляется (строка "#zone <id> <остров> <game|brief|edge>"), например второй переход edge между теми же зонами.', { id: S.str(''), text: S.str('') }, ['id', 'text'], async a => {
+  const w = await loadWorld(io);
   if (!new RegExp(`^#zone\\s+${a.id}\\s`, 'm').test(a.text)) fail(`Текст должен содержать строку "#zone ${a.id} …"`);
+  let b = w.blocks.find(x => x.id === a.id);
+  if (!b) { // new block, e.g. a second edge zone between two zones
+    const m = a.text.match(new RegExp(`^#zone\\s+${a.id}\\s+(\\w+)\\s+(game|brief|edge)\\b`, 'm')) || fail(`Нет зоны ${a.id}; новую задайте строкой "#zone ${a.id} <остров> <game|brief|edge>"`);
+    b = { id: a.id, allod: m[1], type: m[2], text: '' }; w.blocks.push(b);
+  }
   b.text = a.text.replace(/\r?\n/g, '\r\n'); if (!b.text.endsWith('\r\n')) b.text += '\r\n';
   await saveWorld(io, w);
   return { saved: 'Res/texts.res: map.txt' };
@@ -1085,11 +1132,21 @@ tool('texture_import', 'Заменить или создать текстуру 
   resUpdate(res, [{ name: n, data: old?.format === FMT.DXT1 ? encodeMmpDxt1(w, h, px, old.mips) : encodeMmpArgb8(w, h, px) }]);
   return { texture: n, size: [w, h], created: !old };
 });
-tool('terrain_tile_import', 'Своя текстура земли: PNG кладётся в тайл атласа ландшафта (64×64, видимая часть — центральные 48×48, края — запас для стыков). Затем рисуйте этим тайлом через terrain_paint. Тип земли тайла (звук шагов, проходимость) задаётся type. Вместо PNG можно скопировать тайл из атласа другого ландшафта: from_mpr + from_tile (тип берётся оттуда), или целый атлас: atlas + from_mpr (+ from_atlas). Атлас общий для всех карт с тем же именем ландшафта.', { mpr: MPR, tile: S.int('Код тайла atlas*64+index, который заменить'), png_path: S.str('PNG, лучше бесшовный; масштабируется до 48×48'), from_mpr: S.str('Или взять тайл из атласа другого ландшафта (например вода из zone5_1)…'), from_tile: S.int('…его код atlas*64+index'), type: S.str('Тип земли: grass, ground, stone, sand, rock, road, swamp… (необязательно)'), atlas: S.int('Заменить весь атлас N (0…7) атласом from_atlas ландшафта from_mpr — побайтно, с типами тайлов'), from_atlas: S.int('Номер атласа-источника (по умолчанию = atlas)') }, ['mpr'], async a => {
+tool('terrain_tile_import', 'Своя текстура земли: PNG кладётся в тайл атласа ландшафта (64×64, видимая часть — центральные 48×48, края — запас для стыков). Затем рисуйте этим тайлом через terrain_paint. Тип земли тайла (звук шагов, проходимость) задаётся type. Вместо PNG можно скопировать тайл из атласа другого ландшафта: from_mpr + from_tile (тип берётся оттуда), или целый атлас: atlas + from_mpr (+ from_atlas). Атлас общий для всех карт с тем же именем ландшафта.', { mpr: MPR, tile: S.int('Код тайла atlas*64+index, который заменить'), png_path: S.str('PNG, лучше бесшовный; масштабируется до 48×48'), from_mpr: S.str('Или взять тайл из атласа другого ландшафта (например вода из zone5_1)…'), from_tile: S.int('…его код atlas*64+index'), type: S.str('Тип земли: grass, ground, stone, sand, rock, road, swamp… (необязательно)'), atlas: S.int('Заменить весь атлас N атласом from_atlas ландшафта from_mpr — побайтно, с типами тайлов — или картинкой png_path 512×512 (раскладка как у texture_export атласа, тип тайлов — type или types); N = числу атласов добавляет новый атлас'), from_atlas: S.int('Номер атласа-источника (по умолчанию = atlas)'), types: { type: 'array', items: { type: 'string' }, description: 'Для atlas + png_path: типы земли 64 тайлов по порядку (index 0…63)' } }, ['mpr'], async a => {
   let atlasName;
   const out = await editMpr(a, map => {
   if (a.atlas !== undefined) { // whole atlas: raw bytes (no re-encoding) and the 64 tile types
-    if (!(a.atlas >= 0 && a.atlas < map.textures)) fail(`atlas 0…${map.textures - 1}`);
+    if (a.atlas === map.textures && map.textures < 255) { map.textures++; map.tileCount = map.textures * 64; while (map.tileTypes.length < map.tileCount) map.tileTypes.push(0); } // append (game loads any atlas count)
+    if (!(a.atlas >= 0 && a.atlas < map.textures)) fail(`atlas 0…${map.textures} (${map.textures} — добавить новый)`);
+    atlasName = `${map.name}${String(a.atlas).padStart(3, '0')}.mmp`;
+    if (a.png_path) { // the whole atlas from a 512×512 picture laid out like texture_export shows an atlas
+      const src = decodePng(fs.readFileSync(a.png_path));
+      const rgba = src.width === 512 && src.height === 512 ? src.rgba : resizeRgba(src.rgba, src.width, src.height, 512, 512);
+      resUpdate('Res/textures.res', [{ name: atlasName, data: encodeMmpDxt1(512, 512, rgba, 5) }]);
+      const types = Array.isArray(a.types) ? a.types : Array(64).fill(a.type);
+      types.forEach((t, i) => { if (t === undefined || t === null) return; const k = TYPE_EN.indexOf(t) >= 0 ? TYPE_EN.indexOf(t) : TILE_TYPES.indexOf(t); if (k < 0) fail('type: ' + TYPE_EN.join(', ')); map.tileTypes[a.atlas * 64 + i] = k; });
+      return [0, 0, 0, 0];
+    }
     const fm = loadMap(mapRel(a.from_mpr ?? fail('Для atlas нужен from_mpr'), 'mpr')) || fail('Нет ландшафта ' + a.from_mpr), fa = a.from_atlas ?? a.atlas;
     if (!(fa >= 0 && fa < fm.textures)) fail(`from_atlas 0…${fm.textures - 1}`);
     atlasName = `${map.name}${String(a.atlas).padStart(3, '0')}.mmp`;
@@ -1125,6 +1182,48 @@ tool('terrain_tile_import', 'Своя текстура земли: PNG клад�
   return [0, 0, 0, 0];
   }, { graph: false });
   return { atlas: 'Res/textures.res: ' + atlasName, tile: a.tile, ...out };
+});
+
+tool('terrain_passability', 'Проходимость зоны: сетка ИИ игры (клетки 0,5 м, как её строит game.exe из рельефа, воды, типов тайлов и объектов) — сколько клеток закрыто по классам существ и картинка для класса (красный — закрыто, голубой — дорога, зелёный→оранжевый — дороже). paint — кисть по тайлам 2×2 м: block (непроходимо для всех, кроме летающих: тип 15 BLOCK), road (×1), hard (×8, тип «вода» без воды), swamp (×50), orig (вернуть исходный тип). Картинка тайла не меняется: тайл переезжает на копию картинки в свободной ячейке атласа или в новом атласе. Пишутся .mpr, атласы textures.res, aiinfo.res/tileDesc.reg (тип 15) и граф .mob. Обрывы и объекты так не открыть — это рельеф и объекты; клетки под водой берут тип водяного тайла и не меняются.', {
+  mpr: MPR, class: S.int('Класс ИИ для картинки: 0 летающие, 1 мелкие звери, 2 гоблины, 3 люди и орки (по умолчанию), 5 ящеры, 6 огры, 7 тролли'),
+  paint: { type: 'array', description: 'Мазки кисти по порядку', items: { type: 'object', properties: { brush: { type: 'string', enum: ['block', 'road', 'hard', 'swamp', 'orig'] }, x: S.num('Центр, м'), y: S.num('Центр, м'), radius: S.num('Радиус, м (по умолчанию 4)'), x0: S.num('Или прямоугольник: x0, y0, x1, y1'), y0: S.num(''), x1: S.num(''), y1: S.num('') }, required: ['brush'] } },
+  image: { type: 'boolean', description: 'Вернуть картинку сетки (по умолчанию да)' },
+}, ['mpr'], async a => {
+  const rel = mapRel(a.mpr, 'mpr'), stats = { tiles_changed: 0, pictures_copied: 0 };
+  const out = a.paint?.length ? await editMpr(a, map => {
+    const images = [], atlas = i => `${map.name}${String(i).padStart(3, '0')}.mmp`;
+    for (let i = 0; i < map.textures; i++) images.push(decodeMmp(resEntry('Res/textures.res', atlas(i))));
+    const pal = passPalette(map, images), was = map.tiles.slice(), copies = [];
+    let rect = null;
+    for (const op of a.paint) {
+      const br = PASS_BRUSHES.find(b => b.key === op.brush) || fail('brush: block, road, hard, swamp, orig');
+      const s = shapeOf(op, map);
+      for (let ty = Math.max(0, Math.floor(s.y0 / 2)); ty <= Math.min(map.TH - 1, Math.floor(s.y1 / 2)); ty++)
+        for (let tx = Math.max(0, Math.floor(s.x0 / 2)); tx <= Math.min(map.TW - 1, Math.floor(s.x1 / 2)); tx++)
+          if (s.w(tx * 2 + 1, ty * 2 + 1) > 0) { const c = retypeTile(map, pal, ty * map.TW + tx, br.type); if (c) copies.push(c); }
+      rect = unionRect(rect, vertexRect(map, { x0: s.x0 - 2, y0: s.y0 - 2, x1: s.x1 + 2, y1: s.y1 + 2 }));
+    }
+    stats.tiles_changed = map.tiles.reduce((n, t, i) => n + (t !== was[i]), 0); stats.pictures_copied = copies.length;
+    if (!stats.tiles_changed) return null;
+    if (copies.length) { // new Uint8Array: copies (Buffer.slice would write into the cached atlases)
+      const raws = new Map(), raw = i => { if (!raws.has(i)) { try { raws.set(i, new Uint8Array(resEntry('Res/textures.res', atlas(i)))); } catch { raws.set(i, new Uint8Array(raw(0))); } } return raws.get(i); };
+      const to = new Set(copies.map(c => c.to >> 6));
+      for (const c of copies) copyTileBlocks(raw(c.from >> 6), raw(c.to >> 6), c.from, c.to);
+      resUpdate('Res/textures.res', [...to].map(i => ({ name: atlas(i), data: raws.get(i) })));
+    }
+    if (map.tileTypes.includes(BLOCK)) { const reg = withBlockDesc(resEntry('Res/aiinfo.res', 'tileDesc.reg')); if (reg) resUpdate('Res/aiinfo.res', [{ name: 'tileDesc.reg', data: reg }]); }
+    markDirty(map, ...rect);
+    return rect;
+  }) : {};
+  const map = loadMap(rel), mobRel = rel.replace(/\.mpr$/i, '.mob');
+  const g = readGrid(await aimapRaw(writeMpr(map), exists(mobRel) ? readGameFile(mobRel) : new Uint8Array(0)));
+  const k = a.class ?? 3, closed = {};
+  for (let c = 0; c < CLASSES; c++) closed[c] = g.nibble.reduce((n, v) => n + !((v >>> (4 * c)) & 15), 0);
+  const res = { ...out, ...stats, atlases: map.textures, cells: [g.W, g.H], closed_cells_by_class: closed };
+  if (a.image === false) return res;
+  const px = new Uint8Array(g.W * g.H * 4);
+  for (let y = 0; y < g.H; y++) for (let x = 0; x < g.W; x++) { const c = nibbleColor((g.nibble[y * g.W + x] >>> (4 * k)) & 15); px.set([c[0], c[1], c[2], 255], ((g.H - 1 - y) * g.W + x) * 4); }
+  return { image: encodePng(g.W, g.H, px), text: JSON.stringify(res) + `\nКартинка: класс ${k}, 1 пиксель = 0,5 м, север сверху.` };
 });
 
 // ---------------- JSON-RPC over stdio ----------------

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { exec } from 'node:child_process';
 import { HERE, config, GAME, gamePath, httpError, writeGameFile, loadRes, resEntry, resUpdate, listBackups, restore } from './src/game.js';
+import { aimapRaw } from './src/aimap.js';
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.txt': 'text/plain; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml' };
 const STATIC = { '/formats/': path.join(HERE, 'src', 'formats'), '/shared/': path.join(HERE, 'src', 'shared'), '/vendor/three/': path.join(HERE, 'node_modules', 'three'), '/data/': path.join(HERE, 'data'), '/': path.join(HERE, 'public') };
@@ -28,6 +29,11 @@ const api = {
   'POST /api/res/update': async ({ q, req }) => {
     const { put = [], remove = [] } = JSON.parse((await body(req)).toString('utf8'));
     return { ok: true, count: resUpdate(q.path, put.map(p => ({ name: p.name, data: new Uint8Array(Buffer.from(p.b64, 'base64')) })), remove) };
+  },
+  // Body: u32 mprLen, mpr, mob (current editor state) -> game.exe's fine AI grid (+ graph costs with graph=1).
+  'POST /api/aimap': async ({ q, req }) => {
+    const b = await body(req), n = b.readUInt32LE(0);
+    return aimapRaw(b.subarray(4, 4 + n), b.subarray(4 + n), { graph: q.graph === '1' });
   },
   'GET /api/backups': () => listBackups(),
   'POST /api/restore': ({ q }) => ({ restored: restore(q.path) }),

@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { api } from '/app.js';
 import { decodeMmp } from '/formats/mmp.js';
-import { readModel, readFig, unpackItemUv, figGeometry, blendVariants } from '/formats/fig.js';
+import { readModel, readFig, unpackItemUv, figGeometry, blendVariants, readAnimations } from '/formats/fig.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { heightAt, waterHeightAt } from '/formats/mpr.js';
 
@@ -157,6 +157,28 @@ export function poseModel(root, anim, frame) {
     const p = t.trans[Math.min(frame, t.trans.length - 1)];
     if (p && name === [...root.userData.parts.keys()][0]) node.position.fromArray(p);
   }
+}
+
+// Stand a creature in the first frame of its lowest-numbered idle ("cidle01"…), as the game and New EI do;
+// without it units show their bind pose (arms spread).
+const animCache = new Map();
+export async function idlePose(root, name) {
+  const key = name.toLowerCase();
+  if (!animCache.has(key)) animCache.set(key, api.resEntry('Res/figures.res', key + '.anm').then(readAnimations).catch(() => []));
+  const idle = (await animCache.get(key)).filter(a => /idle/i.test(a.name)).sort((a, b) => a.name.localeCompare(b.name))[0];
+  if (idle) poseModel(root, idle, 0);
+}
+
+// A creature's texture: "defaultN" (humans, orcs) is the race skin <model>skin_NN from redress.res, NN = the
+// prototype's skin index (units.udb) or N (New EI scene.go textureName); anything else is a textures.res name.
+export async function unitSkin(model, texture, skin) {
+  const d = /^default(\d*)$/i.exec(texture || '');
+  if (!d) return texture ? gameTexture(texture) : null;
+  for (const k of [skin >= 0 ? skin : +d[1] || 0, 0]) {
+    const t = await gameTexture(`${model}skin_${String(k).padStart(2, '0')}`, 'Res/redress.res');
+    if (t) return t;
+  }
+  return null;
 }
 
 // ---- terrain ----

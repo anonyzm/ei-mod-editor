@@ -6,8 +6,9 @@
 //     0xFFFF = no passage; 16 x metres for class 0, 32 x metres for the others.
 //   anchor: walk point inside the node, high nibble y / low nibble x in 0.5 m steps (0x33 = centre-ish).
 //   region: connected component of open edges, numbered from 1 in row-major order.
-// The original builder (Nival's editor) is not available; buildAiGraph() uses rules fitted to the
-// original zones (~85% of edges agree) and is meant for changed areas and brand-new zones.
+// The game's own builder runs in tools/aimap (New EI's port of game.exe, see src/aimap.js; readGrid and
+// mergeGraph below). buildAiGraph() is the older fallback with rules fitted to the original zones (~85% of
+// edges agree), used where Go/New EI are missing and for brand-new zones.
 export const AIGRAPH_ID = 0x31415926;
 export const CLASSES = 8;
 export const DIRS = [[0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1], [1, 1], [1, 0], [1, -1]];
@@ -143,5 +144,65 @@ export function buildAiGraph(map, rects, { base = null, dirty = () => true } = {
     }
   }
   computeRegions(gr);
+  return gr;
+}
+
+// ---- game.exe's own passability (tools/aimap, src/aimap.js) ----
+// AITerrainCost (game.exe 0x5B6070): a cell nibble -> step cost multiplier in 1/1024, -1 = closed.
+export const NIBBLE_COST = [-1, 25600, 30700, 35800, 12280, 14320, 16380, 3580, 4095, 4605, 5120, 1638, 1842, 2048, 1024, 1228];
+
+// Helper output -> { W, H (0.5 m cells), nibble: u32 per cell (class k = bits 4k..4k+3, 0 closed),
+//   type: u8 terrain type per cell, gW, gH, costs: 8 x Uint16Array(gW*gH*8) or null }.
+export function readGrid(u8) {
+  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength), W = dv.getUint32(0, true), H = dv.getUint32(4, true), N = W * H;
+  const nibble = new Uint32Array(N), type = u8.slice(8 + N * 4, 8 + N * 5);
+  for (let i = 0; i < N; i++) nibble[i] = dv.getUint32(8 + i * 4, true);
+  let p = 8 + N * 5;
+  const gW = dv.getUint32(p, true), gH = dv.getUint32(p + 4, true);
+  p += 8;
+  const costs = gW ? Array.from({ length: CLASSES }, (_, k) => { const n = gW * gH * 8, c = new Uint16Array(n); for (let i = 0; i < n; i++) c[i] = dv.getUint16(p + (k * n + i) * 2, true); return c; }) : null;
+  return { W, H, nibble, type, gW, gH, costs };
+}
+
+// Moves the anchors of the nodes where dirty(x, y) is true onto a cell the class may stand in (grid: readGrid),
+// the open one nearest the node's centre, when the present one is closed. The game's own choice is not decoded;
+// a new zone starts with 0x33 everywhere, and an anchor under a tree or a cliff makes the builder close every edge
+// of its node (New EI then finds no path out of it). Returns how many anchors moved.
+export function fixAnchors(graph, grid, dirty) {
+  const { W, H } = graph, cellOpen = (k, cx, cy) => cx >= 0 && cy >= 0 && cx < grid.W && cy < grid.H && (grid.nibble[cy * grid.W + cx] >>> (4 * k) & 15) !== 0;
+  let moved = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (dirty(x, y)) graph.layers.forEach((L, k) => {
+    const n = y * W + x, a = L.anchor[n];
+    if (cellOpen(k, x * 8 + (a & 15), y * 8 + (a >> 4))) return;
+    let best = -1, bd = Infinity;
+    for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) { const d = (i - 3.5) ** 2 + (j - 3.5) ** 2; if (d < bd && cellOpen(k, x * 8 + i, y * 8 + j)) { bd = d; best = j << 4 | i; } }
+    if (best >= 0) { L.anchor[n] = best; moved++; }
+  });
+  return moved;
+}
+
+// The original graph with every edge of the nodes where dirty(x, y) is true, and of their neighbours (an
+// edge's search window reaches one node further), taken from `costs` (the game's builder: symmetric, so
+// both directions are set); anchors stay, regions are renumbered.
+export function mergeGraph(base, costs, dirty) {
+  const { W, H } = base, gr = { W, H, layers: base.layers.map(L => ({ cost: L.cost.slice(), anchor: L.anchor.slice(), region: L.region.slice() })) };
+  const take = new Uint8Array(W * H);
+  let any = false;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (dirty(x, y)) {
+    any = true;
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (x + i >= 0 && y + j >= 0 && x + i < W && y + j < H) take[(y + j) * W + x + i] = 1;
+  }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!take[y * W + x]) continue;
+    const n = y * W + x;
+    gr.layers.forEach((L, k) => {
+      for (let d = 0; d < 8; d++) {
+        const v = costs[k][n * 8 + d], tx = x + DIRS[d][0], ty = y + DIRS[d][1];
+        L.cost[n * 8 + d] = v;
+        if (tx >= 0 && ty >= 0 && tx < W && ty < H) L.cost[(ty * W + tx) * 8 + (d + 4) % 8] = v;
+      }
+    });
+  }
+  if (any) computeRegions(gr);
   return gr;
 }

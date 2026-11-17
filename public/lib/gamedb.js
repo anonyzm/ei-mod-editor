@@ -56,7 +56,7 @@ export function units() {
     for (const r of d.tables.find(x => x.id === 3).records) {
       const race = races.get(val(r, 3, 1).toLowerCase()) || {};
       const cx = [5, 6, 7].map(i => +val(r, 3, i));
-      prototypes.push({ name: val(r, 3, 0), kind: 'монстр', model: race.model, texture: race.textures?.[0], complection: cx.every(Number.isFinite) ? cx : null });
+      prototypes.push({ name: val(r, 3, 0), kind: 'монстр', model: race.model, texture: race.textures?.[0], skin: +val(r, 3, 3), complection: cx.every(Number.isFinite) ? cx : null });
     }
     const byName = new Map(prototypes.map(p => [p.name.toLowerCase(), p]));
     for (const r of d.tables.find(x => x.id === 4).records) { const n = val(r, 4, 0), m = byName.get(n.toLowerCase()); prototypes.push({ ...m, name: n, kind: 'НПС' }); }

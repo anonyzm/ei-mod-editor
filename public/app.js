@@ -1,10 +1,12 @@
 // App shell: navigation, server API, small DOM helpers shared by all views.
 export const api = {
   async json(url, opts) { const r = await fetch(url, opts); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j; },
-  async bytes(url) { const r = await fetch(url); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); return new Uint8Array(await r.arrayBuffer()); },
+  async bytes(url, opts) { const r = await fetch(url, opts); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); return new Uint8Array(await r.arrayBuffer()); },
   info: () => api.json('/api/info'),
   file: p => api.bytes('/api/file?path=' + encodeURIComponent(p)),
   saveFile: (p, data) => api.json('/api/file?path=' + encodeURIComponent(p), { method: 'PUT', body: data }),
+  // game.exe's passability of the current (unsaved) landscape + objects: src/aimap.js, formats/aigraph.js readGrid
+  aimap: (mpr, mob, graph) => { const n = new Uint8Array(4); new DataView(n.buffer).setUint32(0, mpr.length, true); return api.bytes('/api/aimap' + (graph ? '?graph=1' : ''), { method: 'POST', body: new Blob([n, mpr, mob]) }); },
   resList: p => api.json('/api/res/list?path=' + encodeURIComponent(p)),
   resEntry: (p, name) => api.bytes(`/api/res/entry?path=${encodeURIComponent(p)}&name=${encodeURIComponent(name)}`),
   resUpdate: (p, put = [], remove = []) => api.json('/api/res/update?path=' + encodeURIComponent(p), {

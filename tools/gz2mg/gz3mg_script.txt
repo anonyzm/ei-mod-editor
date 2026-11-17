@@ -1,0 +1,136 @@
+GlobalVars (
+  NULL : object,
+  i : object,
+  VSS#i#val : object,
+  Heroes : group,
+  PanzerQueen : object,
+  OldTroll : object,
+  YoungTroll1 : object,
+  YoungTroll2 : object,
+  TrollChest : object
+)
+
+DeclareScript VCheck#0#9409 (  this : object )
+DeclareScript VCheck#0#9410 (  this : object )
+DeclareScript VCheck#0#9411 (  this : object )
+DeclareScript VCheck#0#9412 (  this : object )
+DeclareScript VCheck#0#9413 (  this : object )
+DeclareScript VCheck#0#9414 (  this : object )
+DeclareScript #OnBriefingComplete (  nPlayer : float,  szComplete : string )
+
+Script VCheck#0#9409
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "z.gz3mg", 2 ) 
+    GSSetVar( 0, "z.gz2mg_gz3mg", 0 ) 
+    GSSetVar( 0, "z.gz2mg_gz3mg_exit", 0 ) 
+    PlayMusic( 0, "Dungeon" ) 
+  )
+)
+
+Script VCheck#0#9410
+(
+  if
+  (
+    IsDead( PanzerQueen ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "gz2mg.queen", 1 ) 
+  )
+)
+
+Script VCheck#0#9411
+(
+  if
+  (
+    IsDead( OldTroll ) 
+    IsDead( YoungTroll1 ) 
+    IsDead( YoungTroll2 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "gz3mg.trolls", 1 ) 
+  )
+)
+
+Script VCheck#0#9412
+(
+  if
+  (
+    IsEqual( GetLeverState( TrollChest ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GiveMoney( 0, 450 ) 
+  )
+)
+
+Script VCheck#0#9413
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg2.2" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz2mg.queen" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg2.2", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg2.3", 1 ) 
+  )
+)
+
+Script VCheck#0#9414
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg7.1" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz3mg.trolls" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg7.1", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg7.2", 1 ) 
+    GiveQuestItem( 0, "TrollFang" ) 
+    QuestComplete( 0, "qgz2mg7" ) 
+    GSSetVarMax( 0, "b.woodcutter.tw2", 1 ) 
+  )
+)
+
+Script #OnBriefingComplete
+(
+  if
+  (
+  )
+  then
+  (
+    KillScript(  ) 
+  )
+)
+
+WorldScript
+(
+  Sleep( 2 ) 
+  TrollChest = GetObjectByID( "383" ) 
+  YoungTroll2 = GetObjectByID( "486" ) 
+  YoungTroll1 = GetObjectByID( "485" ) 
+  OldTroll = GetObjectByID( "484" ) 
+  PanzerQueen = GetObjectByID( "483" ) 
+  VCheck#0#9409( NULL ) 
+  VCheck#0#9410( NULL ) 
+  VCheck#0#9411( NULL ) 
+  VCheck#0#9412( NULL ) 
+  VCheck#0#9413( NULL ) 
+  VCheck#0#9414( NULL ) 
+)

@@ -1,0 +1,2034 @@
+GlobalVars (
+  NULL : object,
+  i : object,
+  VSS#i#val : object,
+  Heroes : group,
+  Olgerd : object,
+  LizardElder : object,
+  Prisoner : object,
+  HerbGhost : object,
+  FireLizard : object,
+  Warchief : object,
+  OrcShaman : object,
+  GraveKeeper : object,
+  Zart : object,
+  FireEl1 : object,
+  FireEl2 : object,
+  FireEl3 : object,
+  FireEl4 : object,
+  MEl1 : object,
+  MEl2 : object,
+  HArcher1 : object,
+  HArcher2 : object,
+  HArcher3 : object,
+  HArcher4 : object,
+  HArcher5 : object,
+  HArcher6 : object,
+  LizardWarrior1 : object,
+  LizardWarrior2 : object,
+  LizardWarrior3 : object,
+  LizardWarrior4 : object,
+  OArcher1 : object,
+  OArcher2 : object,
+  OArcher3 : object,
+  OArcher4 : object,
+  OArcher5 : object,
+  OArcher6 : object,
+  OArcher7 : object,
+  Range1 : object,
+  Range2 : object,
+  Range3 : object,
+  Range4 : object,
+  Spar1 : object,
+  Spar2 : object,
+  Spar3 : object,
+  Spar4 : object,
+  Drummer : object,
+  Wounded1 : object,
+  Wounded2 : object,
+  PrisonCage : object,
+  CageLever : object,
+  MithrilChest : object
+)
+
+DeclareScript VCheck#0#9300 (  this : object )
+DeclareScript VCheck#0#9301 (  this : object )
+DeclareScript VCheck#0#9302 (  this : object )
+DeclareScript VCheck#0#9303 (  this : object )
+DeclareScript VCheck#0#9304 (  this : object )
+DeclareScript VCheck#0#9305 (  this : object )
+DeclareScript VCheck#0#9306 (  this : object )
+DeclareScript VCheck#0#9307 (  this : object )
+DeclareScript VCheck#0#9308 (  this : object )
+DeclareScript VCheck#0#9309 (  this : object )
+DeclareScript VCheck#0#9310 (  this : object )
+DeclareScript VCheck#0#9311 (  this : object )
+DeclareScript VTriger#0#9312 (  this : object )
+DeclareScript VCheck#0#9313 (  this : object )
+DeclareScript VTriger#0#9314 (  this : object )
+DeclareScript VCheck#0#9315 (  this : object )
+DeclareScript VCheck#0#9316 (  this : object )
+DeclareScript VCheck#0#9317 (  this : object )
+DeclareScript VCheck#0#9318 (  this : object )
+DeclareScript VCheck#0#9319 (  this : object )
+DeclareScript VCheck#0#9320 (  this : object )
+DeclareScript VCheck#0#9321 (  this : object )
+DeclareScript VCheck#0#9322 (  this : object )
+DeclareScript VCheck#0#9323 (  this : object )
+DeclareScript VCheck#0#9324 (  this : object )
+DeclareScript VCheck#0#9325 (  this : object )
+DeclareScript VCheck#0#9326 (  this : object )
+DeclareScript VCheck#0#9327 (  this : object )
+DeclareScript VCheck#0#9328 (  this : object )
+DeclareScript VCheck#0#9329 (  this : object )
+DeclareScript VCheck#0#9330 (  this : object )
+DeclareScript VCheck#0#9331 (  this : object )
+DeclareScript VCheck#0#9332 (  this : object )
+DeclareScript VCheck#0#9333 (  this : object )
+DeclareScript VCheck#0#9334 (  this : object )
+DeclareScript VCheck#0#9335 (  this : object )
+DeclareScript VTriger#0#9336 (  this : object )
+DeclareScript VCheck#0#9337 (  this : object )
+DeclareScript VTriger#0#9338 (  this : object )
+DeclareScript VCheck#0#9339 (  this : object )
+DeclareScript VTriger#0#9340 (  this : object )
+DeclareScript VCheck#0#9341 (  this : object )
+DeclareScript VTriger#0#9342 (  this : object )
+DeclareScript VCheck#0#9343 (  this : object )
+DeclareScript VTriger#0#9344 (  this : object )
+DeclareScript VCheck#0#9345 (  this : object )
+DeclareScript VTriger#0#9346 (  this : object )
+DeclareScript VCheck#0#9347 (  this : object )
+DeclareScript VTriger#0#9348 (  this : object )
+DeclareScript VCheck#0#9349 (  this : object )
+DeclareScript VTriger#0#9350 (  this : object )
+DeclareScript VCheck#0#9351 (  this : object )
+DeclareScript VTriger#0#9352 (  this : object )
+DeclareScript VCheck#0#9353 (  this : object )
+DeclareScript VTriger#0#9354 (  this : object )
+DeclareScript VCheck#0#9355 (  this : object )
+DeclareScript VTriger#0#9356 (  this : object )
+DeclareScript VCheck#0#9357 (  this : object )
+DeclareScript VTriger#0#9358 (  this : object )
+DeclareScript VCheck#0#9359 (  this : object )
+DeclareScript VTriger#0#9360 (  this : object )
+DeclareScript VCheck#0#9361 (  this : object )
+DeclareScript VTriger#0#9362 (  this : object )
+DeclareScript VCheck#0#9363 (  this : object )
+DeclareScript VTriger#0#9364 (  this : object )
+DeclareScript VCheck#0#9365 (  this : object )
+DeclareScript VTriger#0#9366 (  this : object )
+DeclareScript VCheck#0#9367 (  this : object )
+DeclareScript VTriger#0#9368 (  this : object )
+DeclareScript VCheck#0#9369 (  this : object )
+DeclareScript VTriger#0#9370 (  this : object )
+DeclareScript VCheck#0#9371 (  this : object )
+DeclareScript VTriger#0#9372 (  this : object )
+DeclareScript VCheck#0#9373 (  this : object )
+DeclareScript VTriger#0#9374 (  this : object )
+DeclareScript VCheck#0#9375 (  this : object )
+DeclareScript VTriger#0#9376 (  this : object )
+DeclareScript VCheck#0#9377 (  this : object )
+DeclareScript VTriger#0#9378 (  this : object )
+DeclareScript VCheck#0#9379 (  this : object )
+DeclareScript VTriger#0#9380 (  this : object )
+DeclareScript VCheck#0#9381 (  this : object )
+DeclareScript VTriger#0#9382 (  this : object )
+DeclareScript VCheck#0#9383 (  this : object )
+DeclareScript VTriger#0#9384 (  this : object )
+DeclareScript VCheck#0#9385 (  this : object )
+DeclareScript VTriger#0#9386 (  this : object )
+DeclareScript VCheck#0#9387 (  this : object )
+DeclareScript VTriger#0#9388 (  this : object )
+DeclareScript VCheck#0#9389 (  this : object )
+DeclareScript VTriger#0#9390 (  this : object )
+DeclareScript VCheck#0#9391 (  this : object )
+DeclareScript VTriger#0#9392 (  this : object )
+DeclareScript VCheck#0#9393 (  this : object )
+DeclareScript VTriger#0#9394 (  this : object )
+DeclareScript VCheck#0#9395 (  this : object )
+DeclareScript VTriger#0#9396 (  this : object )
+DeclareScript VCheck#0#9397 (  this : object )
+DeclareScript VTriger#0#9398 (  this : object )
+DeclareScript VCheck#0#9399 (  this : object )
+DeclareScript VTriger#0#9400 (  this : object )
+DeclareScript VCheck#0#9401 (  this : object )
+DeclareScript VTriger#0#9402 (  this : object )
+DeclareScript VCheck#0#9403 (  this : object )
+DeclareScript VTriger#0#9404 (  this : object )
+DeclareScript VCheck#0#9405 (  this : object )
+DeclareScript VTriger#0#9406 (  this : object )
+DeclareScript VCheck#0#9407 (  this : object )
+DeclareScript VTriger#0#9408 (  this : object )
+DeclareScript #OnBriefingComplete (  nPlayer : float,  szComplete : string )
+
+Script VCheck#0#9300
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "z.gz2mg", 2 ) 
+    GSSetVar( 0, "z.gz1mg_gz2mg", 0 ) 
+    GSSetVarMax( 0, "z.gz3mg", 1 ) 
+    GSSetVar( 0, "z.gz2mg_gz3mg", 0 ) 
+    GSSetVar( 0, "z.gz2mg_gz3mg_exit", 0 ) 
+    GSSetVarMax( 0, "b.bram.c1", 1 ) 
+    GSSetVarMax( 0, "b.rovena.h1", 1 ) 
+    GSSetVarMax( 0, "b.woodcutter.tw1", 1 ) 
+    GSSetVarMax( 0, "b.goran.s1", 1 ) 
+    GSSetVarMax( 0, "b.headman.hf1", 1 ) 
+    GSSetVarMax( 0, "b.gateguard.gg1", 1 ) 
+    PlayMusic( 0, "Nature" ) 
+  )
+)
+
+Script VCheck#0#9301
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg1" ) , 1 ) 
+    Any( i, Heroes, IsLess( DistanceUnitUnit( i, Olgerd ) , 7 )  ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    SendStringEvent( 0, "say gz2mg1 Olgerd" ) 
+    GiveQuestItem( 0, "OlgerdLetter" ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg1.1", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg1.2", 1 ) 
+    QuestComplete( 0, "qgz2mg1" ) 
+    GSSetVarMax( 0, "b.bram.c2", 1 ) 
+  )
+)
+
+Script VCheck#0#9302
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg2" ) , 1 ) 
+    Any( i, Heroes, IsLess( DistanceUnitUnit( i, LizardElder ) , 6 )  ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    SendStringEvent( 0, "say gz2mg2 LizardElder" ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg2.1", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg2.2", 1 ) 
+  )
+)
+
+Script VCheck#0#9303
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg2.3" ) , 1 ) 
+    Any( i, Heroes, IsLess( DistanceUnitPoint( i, 294, 40 ) , 26 )  ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg2.3", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg2", 2 ) 
+    QuestComplete( 0, "qgz2mg2" ) 
+    GSSetVarMax( 0, "b.bram.c3", 1 ) 
+  )
+)
+
+Script VCheck#0#9304
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg2.2" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz2mg.queen" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg2.2", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg2.3", 1 ) 
+  )
+)
+
+Script VCheck#0#9305
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg7.1" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz3mg.trolls" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg7.1", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg7.2", 1 ) 
+    GiveQuestItem( 0, "TrollFang" ) 
+    QuestComplete( 0, "qgz2mg7" ) 
+    GSSetVarMax( 0, "b.woodcutter.tw2", 1 ) 
+  )
+)
+
+Script VCheck#0#9306
+(
+  if
+  (
+    Any( i, Heroes, IsLess( DistanceUnitPoint( i, 291, 121 ) , 9 )  ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "gz2mg.ferry", 1 ) 
+  )
+)
+
+Script VCheck#0#9307
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg3.1" ) , 1 ) 
+    Any( i, Heroes, IsLess( DistanceUnitPoint( i, 291, 124 ) , 10 )  ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg3.1", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg3.2", 1 ) 
+  )
+)
+
+Script VCheck#0#9308
+(
+  if
+  (
+    IsDead( GraveKeeper ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "gz2mg.keeper", 1 ) 
+  )
+)
+
+Script VCheck#0#9309
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg3.2" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz2mg.keeper" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg3.2", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg3", 2 ) 
+    QuestComplete( 0, "qgz2mg3" ) 
+    GSSetVarMax( 0, "b.bram.c4", 1 ) 
+    GSSetVarMax( 0, "gz2mg.ferry", 1 ) 
+  )
+)
+
+Script VCheck#0#9310
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "gz2mg.ferry" ) , 1 ) 
+    Any( i, Heroes, IsLess( DistanceUnitUnit( i, LizardElder ) , 7 )  ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    SendStringEvent( 0, "say gz2mg3 LizardElder" ) 
+  )
+)
+
+Script VCheck#0#9311
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "gz2mg.ferry" ) , 1 ) 
+    Any( i, Heroes, IsLess( DistanceUnitPoint( i, 159.1, 64.8 ) , 2.4 )  ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9312( this ) 
+  )
+)
+
+Script VTriger#0#9312
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    For( VSS#i#val, Heroes ) 
+    (
+      SetCP( VSS#i#val, Add( 180.5, Random( 3 )  ) , Add( 67.1, Random( 3 )  ) , 0 ) 
+    ) 
+    Sleep( 40 ) 
+    VCheck#0#9311( this ) 
+  )
+)
+
+Script VCheck#0#9313
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "gz2mg.ferry" ) , 1 ) 
+    Any( i, Heroes, IsLess( DistanceUnitPoint( i, 176.1, 67.3 ) , 2.4 )  ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9314( this ) 
+  )
+)
+
+Script VTriger#0#9314
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    For( VSS#i#val, Heroes ) 
+    (
+      SetCP( VSS#i#val, Add( 152.8, Random( 3 )  ) , Add( 63, Random( 3 )  ) , 0 ) 
+    ) 
+    Sleep( 40 ) 
+    VCheck#0#9313( this ) 
+  )
+)
+
+Script VCheck#0#9315
+(
+  if
+  (
+    IsDead( Warchief ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "gz2mg.chief", 1 ) 
+  )
+)
+
+Script VCheck#0#9316
+(
+  if
+  (
+    IsDead( OrcShaman ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "gz2mg.shaman", 1 ) 
+  )
+)
+
+Script VCheck#0#9317
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg4.1" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz2mg.chief" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg4.1", 2 ) 
+  )
+)
+
+Script VCheck#0#9318
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg4.2" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz2mg.shaman" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg4.2", 2 ) 
+    GiveQuestItem( 0, "FireAmulet" ) 
+  )
+)
+
+Script VCheck#0#9319
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg4.1" ) , 2 ) 
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg4.2" ) , 2 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg4.3", 1 ) 
+    QuestComplete( 0, "qgz2mg4" ) 
+    GSSetVarMax( 0, "b.bram.c5", 1 ) 
+  )
+)
+
+Script VCheck#0#9320
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg5.1" ) , 1 ) 
+    Any( i, Heroes, IsLess( DistanceUnitPoint( i, 289, 242 ) , 15 )  ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg5.1", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg5.2", 1 ) 
+  )
+)
+
+Script VCheck#0#9321
+(
+  if
+  (
+    IsDead( Zart ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "gz2mg.zart", 1 ) 
+    CreateParticleSource( 20001, GetX( FireEl1 ) , GetY( FireEl1 ) , GetZ( FireEl1 ) , 0.8, "Fireblast" )  
+    InflictDamage( FireEl1, 3000 )  
+    CreateParticleSource( 20002, GetX( FireEl2 ) , GetY( FireEl2 ) , GetZ( FireEl2 ) , 0.8, "Fireblast" )  
+    InflictDamage( FireEl2, 3000 )  
+    CreateParticleSource( 20003, GetX( FireEl3 ) , GetY( FireEl3 ) , GetZ( FireEl3 ) , 0.8, "Fireblast" )  
+    InflictDamage( FireEl3, 3000 )  
+    CreateParticleSource( 20004, GetX( FireEl4 ) , GetY( FireEl4 ) , GetZ( FireEl4 ) , 0.8, "Fireblast" )  
+    InflictDamage( FireEl4, 3000 )  
+    CreateParticleSource( 20005, GetX( MEl1 ) , GetY( MEl1 ) , GetZ( MEl1 ) , 0.8, "Fireblast" )  
+    InflictDamage( MEl1, 3000 )  
+    CreateParticleSource( 20006, GetX( MEl2 ) , GetY( MEl2 ) , GetZ( MEl2 ) , 0.8, "Fireblast" )  
+    InflictDamage( MEl2, 3000 )  
+    Sleep( 40 )  
+    DeleteParticleSource( 20001 )  
+    DeleteParticleSource( 20002 )  
+    DeleteParticleSource( 20003 )  
+    DeleteParticleSource( 20004 )  
+    DeleteParticleSource( 20005 )  
+    DeleteParticleSource( 20006 )  
+  )
+)
+
+Script VCheck#0#9322
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg5.1" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg5.1", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg5.2", 1 ) 
+  )
+)
+
+Script VCheck#0#9323
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg5.2" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg5.2", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg5.3", 1 ) 
+    GiveQuestItem( 0, "ZartJournal" ) 
+    QuestComplete( 0, "qgz2mg5" ) 
+    GSSetVarMax( 0, "b.bram.c6", 1 ) 
+  )
+)
+
+Script VCheck#0#9324
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) 
+    Any( i, Heroes, IsLess( DistanceUnitUnit( i, Olgerd ) , 7 )  ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    SendStringEvent( 0, "say gz2mg5 Olgerd" ) 
+  )
+)
+
+Script VCheck#0#9325
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg6.1" ) , 1 ) 
+    Any( i, Heroes, IsLess( DistanceUnitPoint( i, 40, 226 ) , 13 )  ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg6.1", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg6.2", 1 ) 
+  )
+)
+
+Script VCheck#0#9326
+(
+  if
+  (
+    IsDead( HerbGhost ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "gz2mg.ghost", 1 ) 
+  )
+)
+
+Script VCheck#0#9327
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg6.1" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz2mg.ghost" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg6.1", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg6.2", 1 ) 
+  )
+)
+
+Script VCheck#0#9328
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg6.2" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz2mg.ghost" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg6.2", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg6.3", 1 ) 
+    GiveQuestItem( 0, "HerbBag" ) 
+    QuestComplete( 0, "qgz2mg6" ) 
+    GSSetVarMax( 0, "b.rovena.h2", 1 ) 
+  )
+)
+
+Script VCheck#0#9329
+(
+  if
+  (
+    IsEqual( GetLeverState( MithrilChest ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GiveItem( 0, "material.mithrill" ) 
+    GiveItem( 0, "material.mithrill" ) 
+    GSSetVarMax( 0, "gz2mg.mithril", 1 ) 
+  )
+)
+
+Script VCheck#0#9330
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg8.1" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz2mg.mithril" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg8.1", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg8.2", 1 ) 
+    QuestComplete( 0, "qgz2mg8" ) 
+    GSSetVarMax( 0, "b.goran.s2", 1 ) 
+  )
+)
+
+Script VCheck#0#9331
+(
+  if
+  (
+    IsDead( FireLizard ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "gz2mg.firelizard", 1 ) 
+  )
+)
+
+Script VCheck#0#9332
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg9.1" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz2mg.firelizard" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg9.1", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg9.2", 1 ) 
+    GiveQuestItem( 0, "FireScale" ) 
+    QuestComplete( 0, "qgz2mg9" ) 
+    GSSetVarMax( 0, "b.headman.hf2", 1 ) 
+  )
+)
+
+Script VCheck#0#9333
+(
+  if
+  (
+    IsEqual( GetLeverState( CageLever ) , 1 ) 
+    IsAlive( Prisoner ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    SwitchLeverState( PrisonCage, 1 ) 
+    Sleep( 10 ) 
+    SendStringEvent( 0, "say gz2mg4 Prisoner" ) 
+    Sleep( 30 ) 
+    Run( Prisoner ) 
+    MoveToPoint( Prisoner, 176.1, 70.3 ) 
+    GSSetVarMax( 0, "gz2mg.freed", 1 ) 
+    Sleep( 400 ) 
+    RemoveUnitFromServer( Prisoner ) 
+  )
+)
+
+Script VCheck#0#9334
+(
+  if
+  (
+    IsEqual( GSGetVar( 0, "q.gz2mg.qgz2mg10.1" ) , 1 ) 
+    IsEqual( GSGetVar( 0, "gz2mg.freed" ) , 1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg10.1", 2 ) 
+    GSSetVarMax( 0, "q.gz2mg.qgz2mg10.2", 1 ) 
+    QuestComplete( 0, "qgz2mg10" ) 
+    GSSetVarMax( 0, "b.gateguard.gg2", 1 ) 
+  )
+)
+
+Script VCheck#0#9335
+(
+  if
+  (
+    IsAlive( FireEl1 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9336( this ) 
+  )
+)
+
+Script VTriger#0#9336
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    CastSpellPoint( "fireball{e0;e0}", GetX( FireEl1 ) , GetY( FireEl1 ) , Add( 76.6, Random( 4 )  ) , Add( 182.9, Random( 4 )  )  ) 
+    Sleep( 70 ) 
+    VCheck#0#9335( this ) 
+  )
+)
+
+Script VCheck#0#9337
+(
+  if
+  (
+    IsAlive( FireEl2 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9338( this ) 
+  )
+)
+
+Script VTriger#0#9338
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    CastSpellPoint( "fireball{e0;e0}", GetX( FireEl2 ) , GetY( FireEl2 ) , Add( 82.4, Random( 4 )  ) , Add( 171.6, Random( 4 )  )  ) 
+    Sleep( 87 ) 
+    VCheck#0#9337( this ) 
+  )
+)
+
+Script VCheck#0#9339
+(
+  if
+  (
+    IsAlive( FireEl3 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9340( this ) 
+  )
+)
+
+Script VTriger#0#9340
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    CastSpellPoint( "fireball{e0;e0}", GetX( FireEl3 ) , GetY( FireEl3 ) , Add( 89.5, Random( 4 )  ) , Add( 163.5, Random( 4 )  )  ) 
+    Sleep( 104 ) 
+    VCheck#0#9339( this ) 
+  )
+)
+
+Script VCheck#0#9341
+(
+  if
+  (
+    IsAlive( FireEl4 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9342( this ) 
+  )
+)
+
+Script VTriger#0#9342
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    CastSpellPoint( "fireball{e0;e0}", GetX( FireEl4 ) , GetY( FireEl4 ) , Add( 98.0, Random( 4 )  ) , Add( 154.2, Random( 4 )  )  ) 
+    Sleep( 121 ) 
+    VCheck#0#9341( this ) 
+  )
+)
+
+Script VCheck#0#9343
+(
+  if
+  (
+    IsAlive( HArcher2 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9344( this ) 
+  )
+)
+
+Script VTriger#0#9344
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    CastSpellPoint( "arrow", GetX( HArcher2 ) , GetY( HArcher2 ) , Add( 92.6, Random( 4 )  ) , Add( 197.3, Random( 4 )  )  ) 
+    Sleep( 55 ) 
+    VCheck#0#9343( this ) 
+  )
+)
+
+Script VCheck#0#9345
+(
+  if
+  (
+    IsAlive( HArcher4 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9346( this ) 
+  )
+)
+
+Script VTriger#0#9346
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    CastSpellPoint( "arrow", GetX( HArcher4 ) , GetY( HArcher4 ) , Add( 97.2, Random( 4 )  ) , Add( 184.7, Random( 4 )  )  ) 
+    Sleep( 75 ) 
+    VCheck#0#9345( this ) 
+  )
+)
+
+Script VCheck#0#9347
+(
+  if
+  (
+    IsAlive( LizardWarrior3 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9348( this ) 
+  )
+)
+
+Script VTriger#0#9348
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    CastSpellPoint( "acid_ray", GetX( LizardWarrior3 ) , GetY( LizardWarrior3 ) , Add( 110.2, Random( 4 )  ) , Add( 169.9, Random( 4 )  )  ) 
+    Sleep( 95 ) 
+    VCheck#0#9347( this ) 
+  )
+)
+
+Script VCheck#0#9349
+(
+  if
+  (
+    IsAlive( FireEl1 ) 
+    IsAlive( HArcher1 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9350( this ) 
+  )
+)
+
+Script VTriger#0#9350
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 560, Random( 240 )  ) ) 
+    CastSpellUnit( "fireball{e0;e0}", GetX( FireEl1 ) , GetY( FireEl1 ) , HArcher1 ) 
+    Sleep( 10 ) 
+    VCheck#0#9349( this ) 
+  )
+)
+
+Script VCheck#0#9351
+(
+  if
+  (
+    IsAlive( FireEl1 ) 
+    IsAlive( HArcher6 ) 
+    IsDead( HArcher1 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9352( this ) 
+  )
+)
+
+Script VTriger#0#9352
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 560, Random( 240 )  ) ) 
+    CastSpellUnit( "fireball{e0;e0}", GetX( FireEl1 ) , GetY( FireEl1 ) , HArcher6 ) 
+    Sleep( 10 ) 
+    VCheck#0#9351( this ) 
+  )
+)
+
+Script VCheck#0#9353
+(
+  if
+  (
+    IsAlive( FireEl2 ) 
+    IsAlive( HArcher3 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9354( this ) 
+  )
+)
+
+Script VTriger#0#9354
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 640, Random( 240 )  ) ) 
+    CastSpellUnit( "fireball{e0;e0}", GetX( FireEl2 ) , GetY( FireEl2 ) , HArcher3 ) 
+    Sleep( 10 ) 
+    VCheck#0#9353( this ) 
+  )
+)
+
+Script VCheck#0#9355
+(
+  if
+  (
+    IsAlive( FireEl2 ) 
+    IsAlive( LizardWarrior1 ) 
+    IsDead( HArcher3 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9356( this ) 
+  )
+)
+
+Script VTriger#0#9356
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 640, Random( 240 )  ) ) 
+    CastSpellUnit( "fireball{e0;e0}", GetX( FireEl2 ) , GetY( FireEl2 ) , LizardWarrior1 ) 
+    Sleep( 10 ) 
+    VCheck#0#9355( this ) 
+  )
+)
+
+Script VCheck#0#9357
+(
+  if
+  (
+    IsAlive( FireEl3 ) 
+    IsAlive( LizardWarrior2 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9358( this ) 
+  )
+)
+
+Script VTriger#0#9358
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 600, Random( 240 )  ) ) 
+    CastSpellUnit( "fireball{e0;e0}", GetX( FireEl3 ) , GetY( FireEl3 ) , LizardWarrior2 ) 
+    Sleep( 10 ) 
+    VCheck#0#9357( this ) 
+  )
+)
+
+Script VCheck#0#9359
+(
+  if
+  (
+    IsAlive( FireEl3 ) 
+    IsAlive( LizardWarrior4 ) 
+    IsDead( LizardWarrior2 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9360( this ) 
+  )
+)
+
+Script VTriger#0#9360
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 600, Random( 240 )  ) ) 
+    CastSpellUnit( "fireball{e0;e0}", GetX( FireEl3 ) , GetY( FireEl3 ) , LizardWarrior4 ) 
+    Sleep( 10 ) 
+    VCheck#0#9359( this ) 
+  )
+)
+
+Script VCheck#0#9361
+(
+  if
+  (
+    IsAlive( FireEl4 ) 
+    IsAlive( HArcher5 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9362( this ) 
+  )
+)
+
+Script VTriger#0#9362
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 720, Random( 240 )  ) ) 
+    CastSpellUnit( "fireball{e0;e0}", GetX( FireEl4 ) , GetY( FireEl4 ) , HArcher5 ) 
+    Sleep( 10 ) 
+    VCheck#0#9361( this ) 
+  )
+)
+
+Script VCheck#0#9363
+(
+  if
+  (
+    IsAlive( FireEl4 ) 
+    IsAlive( HArcher4 ) 
+    IsDead( HArcher5 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9364( this ) 
+  )
+)
+
+Script VTriger#0#9364
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 720, Random( 240 )  ) ) 
+    CastSpellUnit( "fireball{e0;e0}", GetX( FireEl4 ) , GetY( FireEl4 ) , HArcher4 ) 
+    Sleep( 10 ) 
+    VCheck#0#9363( this ) 
+  )
+)
+
+Script VCheck#0#9365
+(
+  if
+  (
+    IsAlive( HArcher2 ) 
+    IsAlive( OArcher2 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9366( this ) 
+  )
+)
+
+Script VTriger#0#9366
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 380, Random( 240 )  ) ) 
+    CastSpellUnit( "arrow", GetX( HArcher2 ) , GetY( HArcher2 ) , OArcher2 ) 
+    Sleep( 12 ) 
+    InflictDamage( OArcher2, 20 ) 
+    Sleep( 10 ) 
+    VCheck#0#9365( this ) 
+  )
+)
+
+Script VCheck#0#9367
+(
+  if
+  (
+    IsAlive( HArcher2 ) 
+    IsAlive( OArcher5 ) 
+    IsDead( OArcher2 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9368( this ) 
+  )
+)
+
+Script VTriger#0#9368
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 380, Random( 240 )  ) ) 
+    CastSpellUnit( "arrow", GetX( HArcher2 ) , GetY( HArcher2 ) , OArcher5 ) 
+    Sleep( 12 ) 
+    InflictDamage( OArcher5, 20 ) 
+    Sleep( 10 ) 
+    VCheck#0#9367( this ) 
+  )
+)
+
+Script VCheck#0#9369
+(
+  if
+  (
+    IsAlive( HArcher4 ) 
+    IsAlive( OArcher4 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9370( this ) 
+  )
+)
+
+Script VTriger#0#9370
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 430, Random( 240 )  ) ) 
+    CastSpellUnit( "arrow", GetX( HArcher4 ) , GetY( HArcher4 ) , OArcher4 ) 
+    Sleep( 12 ) 
+    InflictDamage( OArcher4, 20 ) 
+    Sleep( 10 ) 
+    VCheck#0#9369( this ) 
+  )
+)
+
+Script VCheck#0#9371
+(
+  if
+  (
+    IsAlive( HArcher4 ) 
+    IsAlive( OArcher7 ) 
+    IsDead( OArcher4 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9372( this ) 
+  )
+)
+
+Script VTriger#0#9372
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 430, Random( 240 )  ) ) 
+    CastSpellUnit( "arrow", GetX( HArcher4 ) , GetY( HArcher4 ) , OArcher7 ) 
+    Sleep( 12 ) 
+    InflictDamage( OArcher7, 20 ) 
+    Sleep( 10 ) 
+    VCheck#0#9371( this ) 
+  )
+)
+
+Script VCheck#0#9373
+(
+  if
+  (
+    IsAlive( HArcher6 ) 
+    IsAlive( OArcher3 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9374( this ) 
+  )
+)
+
+Script VTriger#0#9374
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 470, Random( 240 )  ) ) 
+    CastSpellUnit( "arrow", GetX( HArcher6 ) , GetY( HArcher6 ) , OArcher3 ) 
+    Sleep( 12 ) 
+    InflictDamage( OArcher3, 20 ) 
+    Sleep( 10 ) 
+    VCheck#0#9373( this ) 
+  )
+)
+
+Script VCheck#0#9375
+(
+  if
+  (
+    IsAlive( HArcher6 ) 
+    IsAlive( OArcher1 ) 
+    IsDead( OArcher3 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9376( this ) 
+  )
+)
+
+Script VTriger#0#9376
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 470, Random( 240 )  ) ) 
+    CastSpellUnit( "arrow", GetX( HArcher6 ) , GetY( HArcher6 ) , OArcher1 ) 
+    Sleep( 12 ) 
+    InflictDamage( OArcher1, 20 ) 
+    Sleep( 10 ) 
+    VCheck#0#9375( this ) 
+  )
+)
+
+Script VCheck#0#9377
+(
+  if
+  (
+    IsAlive( LizardWarrior3 ) 
+    IsAlive( OArcher6 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9378( this ) 
+  )
+)
+
+Script VTriger#0#9378
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 520, Random( 240 )  ) ) 
+    CastSpellUnit( "acid_ray", GetX( LizardWarrior3 ) , GetY( LizardWarrior3 ) , OArcher6 ) 
+    Sleep( 12 ) 
+    InflictDamage( OArcher6, 22 ) 
+    Sleep( 10 ) 
+    VCheck#0#9377( this ) 
+  )
+)
+
+Script VCheck#0#9379
+(
+  if
+  (
+    IsAlive( LizardWarrior3 ) 
+    IsAlive( FireEl3 ) 
+    IsDead( OArcher6 ) 
+    Not( IsEqual( GSGetVar( 0, "gz2mg.zart" ) , 1 ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9380( this ) 
+  )
+)
+
+Script VTriger#0#9380
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    Sleep( Add( 520, Random( 240 )  ) ) 
+    CastSpellUnit( "acid_ray", GetX( LizardWarrior3 ) , GetY( LizardWarrior3 ) , FireEl3 ) 
+    Sleep( 12 ) 
+    InflictDamage( FireEl3, 22 ) 
+    Sleep( 10 ) 
+    VCheck#0#9379( this ) 
+  )
+)
+
+Script VCheck#0#9381
+(
+  if
+  (
+    IsAlive( Range1 ) 
+    Not( Any( i, Heroes, IsLess( DistanceUnitUnit( i, Range1 ) , 22 )  ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9382( this ) 
+  )
+)
+
+Script VTriger#0#9382
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    PlayAnimation( Range1, "uattack02" ) 
+    Sleep( 50 ) 
+    VCheck#0#9381( this ) 
+  )
+)
+
+Script VCheck#0#9383
+(
+  if
+  (
+    IsAlive( Range2 ) 
+    Not( Any( i, Heroes, IsLess( DistanceUnitUnit( i, Range2 ) , 22 )  ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9384( this ) 
+  )
+)
+
+Script VTriger#0#9384
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    PlayAnimation( Range2, "uattack02" ) 
+    Sleep( 56 ) 
+    VCheck#0#9383( this ) 
+  )
+)
+
+Script VCheck#0#9385
+(
+  if
+  (
+    IsAlive( Range3 ) 
+    Not( Any( i, Heroes, IsLess( DistanceUnitUnit( i, Range3 ) , 22 )  ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9386( this ) 
+  )
+)
+
+Script VTriger#0#9386
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    PlayAnimation( Range3, "uattack02" ) 
+    Sleep( 62 ) 
+    VCheck#0#9385( this ) 
+  )
+)
+
+Script VCheck#0#9387
+(
+  if
+  (
+    IsAlive( Range4 ) 
+    Not( Any( i, Heroes, IsLess( DistanceUnitUnit( i, Range4 ) , 22 )  ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9388( this ) 
+  )
+)
+
+Script VTriger#0#9388
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    PlayAnimation( Range4, "uattack02" ) 
+    Sleep( 68 ) 
+    VCheck#0#9387( this ) 
+  )
+)
+
+Script VCheck#0#9389
+(
+  if
+  (
+    IsAlive( Spar1 ) 
+    IsAlive( Spar2 ) 
+    Not( Any( i, Heroes, IsLess( DistanceUnitUnit( i, Spar1 ) , 22 )  ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9390( this ) 
+  )
+)
+
+Script VTriger#0#9390
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    PlayAnimation( Spar1, "uattack04" ) 
+    PlayAnimation( Spar2, "uattack05" ) 
+    Sleep( 24 ) 
+    PlayAnimation( Spar1, "uattack05" ) 
+    PlayAnimation( Spar2, "uattack04" ) 
+    Sleep( 26 ) 
+    VCheck#0#9389( this ) 
+  )
+)
+
+Script VCheck#0#9391
+(
+  if
+  (
+    IsAlive( Spar3 ) 
+    IsAlive( Spar4 ) 
+    Not( Any( i, Heroes, IsLess( DistanceUnitUnit( i, Spar3 ) , 22 )  ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9392( this ) 
+  )
+)
+
+Script VTriger#0#9392
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    PlayAnimation( Spar3, "uattack04" ) 
+    PlayAnimation( Spar4, "uattack05" ) 
+    Sleep( 24 ) 
+    PlayAnimation( Spar3, "uattack05" ) 
+    PlayAnimation( Spar4, "uattack04" ) 
+    Sleep( 26 ) 
+    VCheck#0#9391( this ) 
+  )
+)
+
+Script VCheck#0#9393
+(
+  if
+  (
+    IsAlive( Drummer ) 
+    Not( Any( i, Heroes, IsLess( DistanceUnitUnit( i, Drummer ) , 22 )  ) ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9394( this ) 
+  )
+)
+
+Script VTriger#0#9394
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    PlayAnimation( Drummer, "uattack01" ) 
+    Sleep( 22 ) 
+    VCheck#0#9393( this ) 
+  )
+)
+
+Script VCheck#0#9395
+(
+  if
+  (
+    IsAlive( Wounded1 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9396( this ) 
+  )
+)
+
+Script VTriger#0#9396
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    PlayAnimation( Wounded1, "crest" ) 
+    Sleep( 240 ) 
+    VCheck#0#9395( this ) 
+  )
+)
+
+Script VCheck#0#9397
+(
+  if
+  (
+    IsAlive( Wounded2 ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9398( this ) 
+  )
+)
+
+Script VTriger#0#9398
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    PlayAnimation( Wounded2, "crest" ) 
+    Sleep( 240 ) 
+    VCheck#0#9397( this ) 
+  )
+)
+
+Script VCheck#0#9399
+(
+  if
+  (
+    IsLess( DistanceUnitPoint( this, 232.9, 33.2 ) , 7.5 ) 
+    IsAlive( this ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9400( this ) 
+  )
+)
+
+Script VTriger#0#9400
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    CreateLightning( GetObjectID( this ) , 232.9, 33.2, 6.77, GetX( this ) , GetY( this ) , GetZ( this ) , 4 ) 
+    InflictDamage( this, 22 ) 
+    Sleep( 15 ) 
+    DeleteLightning( GetObjectID( this )  ) 
+    Sleep( 85 ) 
+    VCheck#0#9399( this ) 
+  )
+)
+
+Script VCheck#0#9401
+(
+  if
+  (
+    IsLess( DistanceUnitPoint( this, 240.5, 60.4 ) , 7.5 ) 
+    IsAlive( this ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9402( this ) 
+  )
+)
+
+Script VTriger#0#9402
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    CreateLightning( GetObjectID( this ) , 240.5, 60.4, 9.12, GetX( this ) , GetY( this ) , GetZ( this ) , 4 ) 
+    InflictDamage( this, 22 ) 
+    Sleep( 15 ) 
+    DeleteLightning( GetObjectID( this )  ) 
+    Sleep( 93 ) 
+    VCheck#0#9401( this ) 
+  )
+)
+
+Script VCheck#0#9403
+(
+  if
+  (
+    IsLess( DistanceUnitPoint( this, 267.3, 85.7 ) , 7.5 ) 
+    IsAlive( this ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9404( this ) 
+  )
+)
+
+Script VTriger#0#9404
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    CreateLightning( GetObjectID( this ) , 267.3, 85.7, 12.2, GetX( this ) , GetY( this ) , GetZ( this ) , 4 ) 
+    InflictDamage( this, 22 ) 
+    Sleep( 15 ) 
+    DeleteLightning( GetObjectID( this )  ) 
+    Sleep( 101 ) 
+    VCheck#0#9403( this ) 
+  )
+)
+
+Script VCheck#0#9405
+(
+  if
+  (
+    IsLess( DistanceUnitPoint( this, 288.2, 107.2 ) , 7.5 ) 
+    IsAlive( this ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9406( this ) 
+  )
+)
+
+Script VTriger#0#9406
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    CreateLightning( GetObjectID( this ) , 288.2, 107.2, 14.1, GetX( this ) , GetY( this ) , GetZ( this ) , 4 ) 
+    InflictDamage( this, 22 ) 
+    Sleep( 15 ) 
+    DeleteLightning( GetObjectID( this )  ) 
+    Sleep( 109 ) 
+    VCheck#0#9405( this ) 
+  )
+)
+
+Script VCheck#0#9407
+(
+  if
+  (
+    IsLess( DistanceUnitPoint( this, 289.0, 247.5 ) , 9 ) 
+    IsAlive( this ) 
+    IsAlive( Zart ) 
+  )
+  then
+  (
+    KillScript(  ) 
+    VTriger#0#9408( this ) 
+  )
+)
+
+Script VTriger#0#9408
+(
+  if
+  (
+
+  )
+  then
+  (
+    KillScript(  ) 
+    CreateLightning( GetObjectID( this ) , 289.0, 247.5, 22.5, GetX( this ) , GetY( this ) , GetZ( this ) , 4 ) 
+    InflictDamage( this, 30 ) 
+    Sleep( 15 ) 
+    DeleteLightning( GetObjectID( this )  ) 
+    Sleep( 117 ) 
+    VCheck#0#9407( this ) 
+  )
+)
+
+Script #OnBriefingComplete
+(
+  if
+  (
+  )
+  then
+  (
+    KillScript(  ) 
+  )
+)
+
+WorldScript
+(
+  Sleep( 2 ) 
+  MithrilChest = GetObjectByID( "402" ) 
+  CageLever = GetObjectByID( "309" ) 
+  PrisonCage = GetObjectByID( "308" ) 
+  Wounded2 = GetObjectByID( "18" ) 
+  Wounded1 = GetObjectByID( "17" ) 
+  Drummer = GetObjectByID( "100" ) 
+  Spar4 = GetObjectByID( "95" ) 
+  Spar3 = GetObjectByID( "94" ) 
+  Spar2 = GetObjectByID( "93" ) 
+  Spar1 = GetObjectByID( "92" ) 
+  Range4 = GetObjectByID( "99" ) 
+  Range3 = GetObjectByID( "98" ) 
+  Range2 = GetObjectByID( "97" ) 
+  Range1 = GetObjectByID( "96" ) 
+  OArcher7 = GetObjectByID( "78" ) 
+  OArcher6 = GetObjectByID( "77" ) 
+  OArcher5 = GetObjectByID( "76" ) 
+  OArcher4 = GetObjectByID( "75" ) 
+  OArcher3 = GetObjectByID( "74" ) 
+  OArcher2 = GetObjectByID( "73" ) 
+  OArcher1 = GetObjectByID( "72" ) 
+  LizardWarrior4 = GetObjectByID( "23" ) 
+  LizardWarrior3 = GetObjectByID( "22" ) 
+  LizardWarrior2 = GetObjectByID( "21" ) 
+  LizardWarrior1 = GetObjectByID( "20" ) 
+  HArcher6 = GetObjectByID( "6" ) 
+  HArcher5 = GetObjectByID( "5" ) 
+  HArcher4 = GetObjectByID( "4" ) 
+  HArcher3 = GetObjectByID( "3" ) 
+  HArcher2 = GetObjectByID( "2" ) 
+  HArcher1 = GetObjectByID( "1" ) 
+  MEl2 = GetObjectByID( "145" ) 
+  MEl1 = GetObjectByID( "143" ) 
+  FireEl4 = GetObjectByID( "82" ) 
+  FireEl3 = GetObjectByID( "81" ) 
+  FireEl2 = GetObjectByID( "80" ) 
+  FireEl1 = GetObjectByID( "79" ) 
+  Zart = GetObjectByID( "155" ) 
+  GraveKeeper = GetObjectByID( "142" ) 
+  OrcShaman = GetObjectByID( "83" ) 
+  Warchief = GetObjectByID( "102" ) 
+  FireLizard = GetObjectByID( "110" ) 
+  HerbGhost = GetObjectByID( "55" ) 
+  Prisoner = GetObjectByID( "1007823502" ) 
+  LizardElder = GetObjectByID( "1926548502" ) 
+  Olgerd = GetObjectByID( "1000305453" ) 
+  VCheck#0#9300( NULL ) 
+  VCheck#0#9301( NULL ) 
+  VCheck#0#9302( NULL ) 
+  VCheck#0#9303( NULL ) 
+  VCheck#0#9304( NULL ) 
+  VCheck#0#9305( NULL ) 
+  VCheck#0#9306( NULL ) 
+  VCheck#0#9307( NULL ) 
+  VCheck#0#9308( NULL ) 
+  VCheck#0#9309( NULL ) 
+  VCheck#0#9310( NULL ) 
+  VCheck#0#9311( NULL ) 
+  VCheck#0#9313( NULL ) 
+  VCheck#0#9315( NULL ) 
+  VCheck#0#9316( NULL ) 
+  VCheck#0#9317( NULL ) 
+  VCheck#0#9318( NULL ) 
+  VCheck#0#9319( NULL ) 
+  VCheck#0#9320( NULL ) 
+  VCheck#0#9321( NULL ) 
+  VCheck#0#9322( NULL ) 
+  VCheck#0#9323( NULL ) 
+  VCheck#0#9324( NULL ) 
+  VCheck#0#9325( NULL ) 
+  VCheck#0#9326( NULL ) 
+  VCheck#0#9327( NULL ) 
+  VCheck#0#9328( NULL ) 
+  VCheck#0#9329( NULL ) 
+  VCheck#0#9330( NULL ) 
+  VCheck#0#9331( NULL ) 
+  VCheck#0#9332( NULL ) 
+  VCheck#0#9333( NULL ) 
+  VCheck#0#9334( NULL ) 
+  VCheck#0#9335( NULL ) 
+  VCheck#0#9337( NULL ) 
+  VCheck#0#9339( NULL ) 
+  VCheck#0#9341( NULL ) 
+  VCheck#0#9343( NULL ) 
+  VCheck#0#9345( NULL ) 
+  VCheck#0#9347( NULL ) 
+  VCheck#0#9349( NULL ) 
+  VCheck#0#9351( NULL ) 
+  VCheck#0#9353( NULL ) 
+  VCheck#0#9355( NULL ) 
+  VCheck#0#9357( NULL ) 
+  VCheck#0#9359( NULL ) 
+  VCheck#0#9361( NULL ) 
+  VCheck#0#9363( NULL ) 
+  VCheck#0#9365( NULL ) 
+  VCheck#0#9367( NULL ) 
+  VCheck#0#9369( NULL ) 
+  VCheck#0#9371( NULL ) 
+  VCheck#0#9373( NULL ) 
+  VCheck#0#9375( NULL ) 
+  VCheck#0#9377( NULL ) 
+  VCheck#0#9379( NULL ) 
+  VCheck#0#9381( NULL ) 
+  VCheck#0#9383( NULL ) 
+  VCheck#0#9385( NULL ) 
+  VCheck#0#9387( NULL ) 
+  VCheck#0#9389( NULL ) 
+  VCheck#0#9391( NULL ) 
+  VCheck#0#9393( NULL ) 
+  VCheck#0#9395( NULL ) 
+  VCheck#0#9397( NULL ) 
+  For( VSS#i#val, Heroes ) 
+  (
+    VCheck#0#9399( VSS#i#val ) 
+  ) 
+  For( VSS#i#val, Heroes ) 
+  (
+    VCheck#0#9401( VSS#i#val ) 
+  ) 
+  For( VSS#i#val, Heroes ) 
+  (
+    VCheck#0#9403( VSS#i#val ) 
+  ) 
+  For( VSS#i#val, Heroes ) 
+  (
+    VCheck#0#9405( VSS#i#val ) 
+  ) 
+  For( VSS#i#val, Heroes ) 
+  (
+    VCheck#0#9407( VSS#i#val ) 
+  ) 
+)
